@@ -3,6 +3,9 @@ package com.example.ui.screens
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
+import com.example.engine.ExportStorageManager
+import java.io.File
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -416,35 +419,80 @@ fun ExportScreen(
             }
           }
 
-          if (exportResult.success && exportResult.outputPath != null) {
-            Box(
-              modifier = Modifier
-                .fillMaxWidth()
-                .shadow(10.dp, RoundedCornerShape(14.dp), spotColor = EmeraldGlow)
-                .clip(RoundedCornerShape(14.dp))
-                .background(Brush.horizontalGradient(listOf(EmeraldGreen, EmeraldGlow)))
-                .clickable {
-                  try {
-                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                      type = "video/mp4"
-                      putExtra(Intent.EXTRA_STREAM, Uri.parse(exportResult.outputPath))
-                      addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                    context.startActivity(Intent.createChooser(shareIntent, "Share Video"))
-                  } catch (e: Exception) {
-                    e.printStackTrace()
-                  }
+          if (exportResult.success) {
+            val contentUri = androidx.compose.runtime.remember(exportResult) {
+              val uriStr = exportResult.outputUri
+              if (uriStr != null && uriStr.startsWith("content://")) {
+                Uri.parse(uriStr)
+              } else {
+                exportResult.outputPath?.let { File(it) }?.let { localFile ->
+                  ExportStorageManager.getShareableContentUri(context, localFile, exportResult.outputUri)
                 }
-                .padding(vertical = 12.dp),
-              contentAlignment = Alignment.Center
+              }
+            }
+
+            Column(
+              modifier = Modifier.fillMaxWidth(),
+              verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-              Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
+              // Action 1: Download / Open in Gallery
+              Box(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .shadow(8.dp, RoundedCornerShape(14.dp), spotColor = CyanHighlight)
+                  .clip(RoundedCornerShape(14.dp))
+                  .background(Brush.horizontalGradient(listOf(ElectricBlue, CyberCyan)))
+                  .clickable {
+                    if (contentUri != null) {
+                      Toast.makeText(context, "Saved to Movies/CutsZoom AI/", Toast.LENGTH_SHORT).show()
+                      ExportStorageManager.openVideo(context, contentUri)
+                    } else {
+                      Toast.makeText(context, "Exported video could not be opened. Please try again.", Toast.LENGTH_SHORT).show()
+                    }
+                  }
+                  .padding(vertical = 12.dp)
+                  .testTag("download_video_button"),
+                contentAlignment = Alignment.Center
               ) {
-                Icon(Icons.Default.Share, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("SHARE EXPORTED VIDEO", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.Center
+                ) {
+                  Icon(Icons.Default.Download, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                  Spacer(Modifier.width(6.dp))
+                  Text("SAVE / OPEN IN GALLERY (MOVIES)", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+              }
+
+              // Action 2: Share to other apps (WhatsApp, Drive, Quick Share, Files)
+              Box(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .shadow(8.dp, RoundedCornerShape(14.dp), spotColor = EmeraldGlow)
+                  .clip(RoundedCornerShape(14.dp))
+                  .background(Brush.horizontalGradient(listOf(EmeraldGreen, EmeraldGlow)))
+                  .clickable {
+                    if (contentUri != null) {
+                      val shareResult = ExportStorageManager.shareVideo(context, contentUri)
+                      if (shareResult.isFailure) {
+                        Toast.makeText(context, "Exported video could not be shared. Please try again.", Toast.LENGTH_SHORT).show()
+                      }
+                    } else {
+                      Toast.makeText(context, "Exported video could not be shared. Please try again.", Toast.LENGTH_SHORT).show()
+                    }
+                  }
+                  .padding(vertical = 12.dp)
+                  .testTag("share_video_button"),
+                contentAlignment = Alignment.Center
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.Center
+                ) {
+                  Icon(Icons.Default.Share, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                  Spacer(Modifier.width(6.dp))
+                  Text("SHARE EXPORTED VIDEO", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
               }
             }
           }

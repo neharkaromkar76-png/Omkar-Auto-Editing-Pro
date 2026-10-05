@@ -129,4 +129,16 @@ class CutsZoomEngineTest {
     assertNotNull(first.scoreDetails)
     assertTrue("Frame must be positive", first.frame > 0)
   }
+
+  @Test
+  fun testSafeExportFileNameFormat() {
+    val name = com.example.engine.ExportStorageManager.generateSafeExportFileName("CutsZoom_Edit")
+    assertTrue("Filename should start with CutsZoom_Edit", name.startsWith("CutsZoom_Edit_"))
+    assertTrue("Filename should end with .mp4", name.endsWith(".mp4"))
+    // Ensure no forbidden characters for filenames
+    val illegalChars = listOf("/", "\\", ":", "*", "?", "\"", "<", ">", "|")
+    illegalChars.forEach { char ->
+      assertTrue("Filename should not contain $char", !name.contains(char))
+    }
+  }
 }

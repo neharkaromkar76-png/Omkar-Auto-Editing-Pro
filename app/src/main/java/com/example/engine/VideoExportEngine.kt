@@ -44,9 +44,8 @@ object VideoExportEngine {
     callback?.onProgress("Initializing video engine...", 0.05f)
 
     val sourceUri = Uri.parse(timeline.source.uri)
-    val outputDir = File(context.filesDir, "exports").apply { mkdirs() }
-    val timestamp = System.currentTimeMillis()
-    val outputFile = File(outputDir, "CutsZoom_Edit_$timestamp.mp4")
+    val exportFileName = ExportStorageManager.generateSafeExportFileName()
+    val outputFile = File(ExportStorageManager.getTempExportDir(context), exportFileName)
 
     // Determine target resolution (9:16 vertical target)
     val (targetWidth, targetHeight) = when (settings.resolution) {
@@ -340,15 +339,38 @@ object VideoExportEngine {
       )
     }
 
+    callback?.onProgress("Persisting video to Movies/CutsZoom AI...", 0.96f)
+    val mediaStoreResult = ExportStorageManager.saveVideoToMediaStore(
+      context = context,
+      sourceFile = outputFile,
+      displayName = exportFileName
+    )
+
+    val finalContentUri = ExportStorageManager.getShareableContentUri(
+      context = context,
+      localFile = outputFile,
+      mediaStoreUriString = mediaStoreResult.getOrNull()?.toString()
+    )
+
+    val finalReport = buildString {
+      append(validation.report)
+      if (mediaStoreResult.isSuccess) {
+        appendLine("• Media Storage: Persisted to Movies/CutsZoom AI/ (Scoped Storage)")
+      } else {
+        appendLine("• Media Storage: Saved locally (FileProvider content://)")
+      }
+      appendLine("• Content URI: $finalContentUri")
+    }
+
     callback?.onProgress("Export completed successfully!", 1.0f)
 
     return@withContext ExportResult(
       success = true,
-      outputUri = Uri.fromFile(outputFile).toString(),
+      outputUri = finalContentUri.toString(),
       outputPath = outputFile.absolutePath,
       durationSeconds = validation.durationSeconds,
       fileSizeBytes = outputFile.length(),
-      validationReport = validation.report
+      validationReport = finalReport
     )
   }
 
