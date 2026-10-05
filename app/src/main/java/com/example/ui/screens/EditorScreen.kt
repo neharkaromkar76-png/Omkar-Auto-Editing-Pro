@@ -1,15 +1,16 @@
 package com.example.ui.screens
 
-import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,49 +25,47 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.model.SpeechBoundary
-import com.example.model.ZoomEvent
 import com.example.ui.components.KeyframeInspector
 import com.example.ui.components.StageProgressModal
 import com.example.ui.components.TimelineTrackView
 import com.example.ui.components.VideoPreviewCanvas
-import com.example.ui.theme.AmberZoom
-import com.example.ui.theme.CyberCyan
-import com.example.ui.theme.DeepSlate950
-import com.example.ui.theme.ElectricIndigo
-import com.example.ui.theme.EmeraldCut
+import com.example.ui.theme.Cinematic3DIconContainer
+import com.example.ui.theme.CinematicPillButton
+import com.example.ui.theme.DarkSurface
+import com.example.ui.theme.DarkVoid
+import com.example.ui.theme.DeepCanvas
+import com.example.ui.theme.ElectricBlue
+import com.example.ui.theme.ElectricBlueGlow
+import com.example.ui.theme.GlassSurface
+import com.example.ui.theme.GoldHighlight
+import com.example.ui.theme.NeonPurple
+import com.example.ui.theme.NeonPurpleGlow
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate500
 import com.example.ui.theme.Slate700
-import com.example.ui.theme.Slate800
-import com.example.ui.theme.Slate850
 import com.example.viewmodel.EditorTab
 import com.example.viewmodel.EditorViewModel
 
@@ -90,9 +89,9 @@ fun EditorScreen(
   val styleProfile by viewModel.styleProfile.collectAsState()
   val customApiKey by viewModel.customApiKey.collectAsState()
 
-  // Handle hardware back press gracefully
-  BackHandler(enabled = activeTab != EditorTab.TIMELINE) {
-    viewModel.setTab(EditorTab.TIMELINE)
+  // Hardware back press handler
+  BackHandler(enabled = activeTab != EditorTab.PROJECT) {
+    viewModel.setTab(EditorTab.PROJECT)
   }
 
   // 12-Stage Auto-Edit Progress Modal
@@ -102,94 +101,131 @@ fun EditorScreen(
   )
 
   Scaffold(
-    modifier = modifier.fillMaxSize().background(DeepSlate950),
+    modifier = modifier.fillMaxSize().background(DarkVoid),
     topBar = {
-      // Top Navigation / Mode Bar
+      // 1. TOP HEADER (3D CUTSZOOM AI Logo + Subtitle + Glowing Pill CTA)
       Surface(
-        color = DeepSlate950,
+        color = DarkVoid,
         modifier = Modifier.fillMaxWidth().statusBarsPadding()
       ) {
         Row(
           modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
+          // Left: 3D Logo + Brand + Tagline
           Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
           ) {
-            Surface(
-              shape = CircleShape,
-              color = AmberZoom,
-              modifier = Modifier.size(26.dp)
-            ) {
-              Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Color.Black, modifier = Modifier.padding(4.dp))
+            Cinematic3DIconContainer(
+              icon = Icons.Default.Videocam,
+              contentDescription = "CutsZoom Logo",
+              size = 38.dp,
+              iconSize = 20.dp,
+              gradientColors = listOf(NeonPurple, ElectricBlue)
+            )
+
+            Column(verticalArrangement = Arrangement.Center) {
+              Text(
+                text = "CUTSZOOM AI",
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 1.sp
+              )
+              Text(
+                text = "Create. Edit. Automate.",
+                color = Slate400,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.5.sp
+              )
             }
-            Text("CUTSZOOM AI", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
           }
 
-          // Primary Quick Action: [ AUTO EDIT ]
-          Button(
+          // Right: Large glowing pill/button: ✨ AUTO EDIT
+          CinematicPillButton(
+            text = "✨ AUTO EDIT",
             onClick = { viewModel.runAutoEdit() },
-            colors = ButtonDefaults.buttonColors(
-              containerColor = ElectricIndigo,
-              contentColor = Color.White
-            ),
-            shape = RoundedCornerShape(8.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
             modifier = Modifier.testTag("top_auto_edit_btn")
-          ) {
-            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AmberZoom, modifier = Modifier.size(13.dp))
-            Spacer(Modifier.width(4.dp))
-            Text("AUTO EDIT", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-          }
+          )
         }
       }
     },
     bottomBar = {
-      // Bottom Navigation Bar
-      NavigationBar(
-        containerColor = DeepSlate950,
-        contentColor = Slate400,
-        modifier = Modifier.navigationBarsPadding().testTag("bottom_nav_bar")
+      // FLOATING PREMIUM GLASS NAVIGATION BAR
+      Box(
+        modifier = Modifier
+          .fillMaxWidth()
+          .navigationBarsPadding()
+          .padding(horizontal = 14.dp, vertical = 10.dp)
+          .testTag("bottom_nav_bar"),
+        contentAlignment = Alignment.Center
       ) {
-        NavigationBarItem(
-          selected = activeTab == EditorTab.PROJECT,
-          onClick = { viewModel.setTab(EditorTab.PROJECT) },
-          icon = { Icon(Icons.Default.Folder, contentDescription = "Project") },
-          label = { Text("Project", fontSize = 10.sp) },
-          colors = navItemColors()
-        )
-        NavigationBarItem(
-          selected = activeTab == EditorTab.TIMELINE,
-          onClick = { viewModel.setTab(EditorTab.TIMELINE) },
-          icon = { Icon(Icons.Default.Timeline, contentDescription = "Timeline") },
-          label = { Text("Edit & Play", fontSize = 10.sp) },
-          colors = navItemColors()
-        )
-        NavigationBarItem(
-          selected = activeTab == EditorTab.INSPECTOR,
-          onClick = { viewModel.setTab(EditorTab.INSPECTOR) },
-          icon = { Icon(Icons.Default.Tune, contentDescription = "Inspector") },
-          label = { Text("Inspector", fontSize = 10.sp) },
-          colors = navItemColors()
-        )
-        NavigationBarItem(
-          selected = activeTab == EditorTab.AI_ANALYSIS,
-          onClick = { viewModel.setTab(EditorTab.AI_ANALYSIS) },
-          icon = { Icon(Icons.Default.Psychology, contentDescription = "AI Analysis") },
-          label = { Text("AI Scoring", fontSize = 10.sp) },
-          colors = navItemColors()
-        )
-        NavigationBarItem(
-          selected = activeTab == EditorTab.EXPORT,
-          onClick = { viewModel.setTab(EditorTab.EXPORT) },
-          icon = { Icon(Icons.Default.Download, contentDescription = "Export") },
-          label = { Text("Export", fontSize = 10.sp) },
-          colors = navItemColors()
-        )
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+              elevation = 16.dp,
+              shape = RoundedCornerShape(26.dp),
+              spotColor = NeonPurple.copy(alpha = 0.35f),
+              ambientColor = Color.Black
+            )
+            .clip(RoundedCornerShape(26.dp))
+            .background(GlassSurface)
+            .border(
+              width = 1.dp,
+              brush = Brush.horizontalGradient(
+                listOf(
+                  ElectricBlueGlow.copy(alpha = 0.4f),
+                  NeonPurpleGlow.copy(alpha = 0.4f),
+                  ElectricBlueGlow.copy(alpha = 0.3f)
+                )
+              ),
+              shape = RoundedCornerShape(26.dp)
+            )
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            CinematicNavItem(
+              label = "Project",
+              icon = Icons.Default.Folder,
+              isSelected = activeTab == EditorTab.PROJECT,
+              onClick = { viewModel.setTab(EditorTab.PROJECT) }
+            )
+            CinematicNavItem(
+              label = "Edit & Play",
+              icon = Icons.Default.Timeline,
+              isSelected = activeTab == EditorTab.TIMELINE,
+              onClick = { viewModel.setTab(EditorTab.TIMELINE) }
+            )
+            CinematicNavItem(
+              label = "Inspector",
+              icon = Icons.Default.Tune,
+              isSelected = activeTab == EditorTab.INSPECTOR,
+              onClick = { viewModel.setTab(EditorTab.INSPECTOR) }
+            )
+            CinematicNavItem(
+              label = "AI Scoring",
+              icon = Icons.Default.Psychology,
+              isSelected = activeTab == EditorTab.AI_ANALYSIS,
+              onClick = { viewModel.setTab(EditorTab.AI_ANALYSIS) }
+            )
+            CinematicNavItem(
+              label = "Export",
+              icon = Icons.Default.Download,
+              isSelected = activeTab == EditorTab.EXPORT,
+              onClick = { viewModel.setTab(EditorTab.EXPORT) }
+            )
+          }
+        }
       }
     }
   ) { paddingValues ->
@@ -197,7 +233,7 @@ fun EditorScreen(
       modifier = Modifier
         .fillMaxSize()
         .padding(paddingValues)
-        .background(DeepSlate950)
+        .background(DarkVoid)
     ) {
       when (activeTab) {
         EditorTab.PROJECT -> {
@@ -209,13 +245,14 @@ fun EditorScreen(
             onLoadSampleVideo = { viewModel.loadSampleVideo() },
             onRunAutoEdit = { viewModel.runAutoEdit() },
             onSetCustomApiKey = { key -> viewModel.setCustomApiKey(key) },
-            onUpdateStyleProfile = { p -> viewModel.updateStyleProfile(p) }
+            onUpdateStyleProfile = { p -> viewModel.updateStyleProfile(p) },
+            onNavigateToAiScoring = { viewModel.setTab(EditorTab.AI_ANALYSIS) }
           )
         }
 
         EditorTab.TIMELINE -> {
           Column(modifier = Modifier.fillMaxSize()) {
-            // Main Studio Center: Large Video Preview
+            // Main Studio Center: Large Video Preview Area
             VideoPreviewCanvas(
               metadata = metadata,
               currentScale = currentScale,
@@ -226,7 +263,7 @@ fun EditorScreen(
               modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .padding(horizontal = 14.dp, vertical = 6.dp)
             )
 
             // Bottom Multi-Track Professional Timeline
@@ -255,7 +292,6 @@ fun EditorScreen(
           }
 
           Column(modifier = Modifier.fillMaxSize()) {
-            // Mini preview header to observe zoom effect adjustments live
             VideoPreviewCanvas(
               metadata = metadata,
               currentScale = currentScale,
@@ -265,8 +301,8 @@ fun EditorScreen(
               onTogglePlayPause = { viewModel.togglePlayPause() },
               modifier = Modifier
                 .fillMaxWidth()
-                .height(200.dp)
-                .padding(8.dp)
+                .height(210.dp)
+                .padding(horizontal = 14.dp, vertical = 6.dp)
             )
 
             KeyframeInspector(
@@ -311,10 +347,63 @@ fun EditorScreen(
 }
 
 @Composable
-private fun navItemColors() = NavigationBarItemDefaults.colors(
-  selectedIconColor = Color.White,
-  selectedTextColor = Color.White,
-  indicatorColor = ElectricIndigo,
-  unselectedIconColor = Slate500,
-  unselectedTextColor = Slate500
-)
+private fun CinematicNavItem(
+  label: String,
+  icon: ImageVector,
+  isSelected: Boolean,
+  onClick: () -> Unit
+) {
+  val iconColor by animateColorAsState(
+    targetValue = if (isSelected) Color.White else Slate500,
+    label = "nav_icon_color"
+  )
+
+  Box(
+    modifier = Modifier
+      .clip(RoundedCornerShape(20.dp))
+      .clickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = null,
+        onClick = onClick
+      )
+      .then(
+        if (isSelected) {
+          Modifier
+            .background(
+              Brush.horizontalGradient(
+                listOf(NeonPurple.copy(alpha = 0.5f), ElectricBlue.copy(alpha = 0.5f))
+              )
+            )
+            .border(
+              1.dp,
+              Brush.horizontalGradient(listOf(NeonPurpleGlow, ElectricBlueGlow)),
+              RoundedCornerShape(20.dp)
+            )
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+        } else {
+          Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+        }
+      ),
+    contentAlignment = Alignment.Center
+  ) {
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+      Icon(
+        imageVector = icon,
+        contentDescription = label,
+        tint = iconColor,
+        modifier = Modifier.size(18.dp)
+      )
+      if (isSelected) {
+        Text(
+          text = label,
+          color = Color.White,
+          fontSize = 11.sp,
+          fontWeight = FontWeight.Bold
+        )
+      }
+    }
+  }
+}

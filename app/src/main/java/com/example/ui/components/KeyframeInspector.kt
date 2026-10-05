@@ -2,6 +2,7 @@ package com.example.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,14 +21,11 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Grain
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
@@ -36,6 +34,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -44,11 +44,26 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.SpeechBoundary
 import com.example.model.ZoomEvent
+import com.example.ui.theme.AmberGold
 import com.example.ui.theme.AmberZoom
+import com.example.ui.theme.Cinematic3DIconContainer
+import com.example.ui.theme.CinematicGlassCard
 import com.example.ui.theme.CyberCyan
+import com.example.ui.theme.CyanHighlight
+import com.example.ui.theme.DarkSurface
+import com.example.ui.theme.DarkVoid
+import com.example.ui.theme.ElectricBlue
+import com.example.ui.theme.ElectricBlueGlow
 import com.example.ui.theme.ElectricIndigo
-import com.example.ui.theme.ElectricViolet
 import com.example.ui.theme.EmeraldCut
+import com.example.ui.theme.EmeraldGlow
+import com.example.ui.theme.EmeraldGreen
+import com.example.ui.theme.GlassSurface
+import com.example.ui.theme.GlowBadge
+import com.example.ui.theme.GoldHighlight
+import com.example.ui.theme.NeonPurple
+import com.example.ui.theme.NeonPurpleGlow
+import com.example.ui.theme.Slate200
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate500
 import com.example.ui.theme.Slate700
@@ -67,32 +82,32 @@ fun KeyframeInspector(
   modifier: Modifier = Modifier
 ) {
   if (selectedZoomEvent == null) {
-    Card(
+    CinematicGlassCard(
       modifier = modifier
         .fillMaxWidth()
-        .padding(12.dp),
-      colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-      shape = RoundedCornerShape(14.dp)
+        .padding(14.dp),
+      borderBrush = Brush.linearGradient(listOf(Slate800, DarkSurface))
     ) {
       Column(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(24.dp),
+          .padding(28.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
       ) {
-        Icon(
-          imageVector = Icons.Default.ZoomIn,
+        Cinematic3DIconContainer(
+          icon = Icons.Default.Tune,
           contentDescription = null,
-          tint = Slate500,
-          modifier = Modifier.size(36.dp)
+          size = 46.dp,
+          iconSize = 22.dp,
+          gradientColors = listOf(Slate700, Slate800)
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
         Text(
           text = "No Zoom Event Selected",
-          color = Slate400,
+          color = Color.White,
           fontSize = 14.sp,
-          fontWeight = FontWeight.SemiBold
+          fontWeight = FontWeight.Bold
         )
         Text(
           text = "Tap any split marker on the timeline or click 'Split at Playhead'",
@@ -110,20 +125,21 @@ fun KeyframeInspector(
     modifier = modifier
       .fillMaxWidth()
       .verticalScroll(rememberScrollState())
-      .padding(12.dp),
-    verticalArrangement = Arrangement.spacedBy(12.dp)
+      .padding(14.dp),
+    verticalArrangement = Arrangement.spacedBy(14.dp)
   ) {
-    // Header Info Card
-    Card(
-      colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-      shape = RoundedCornerShape(14.dp),
-      border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+    // Header Info Card with Boundary Details
+    CinematicGlassCard(
+      modifier = Modifier.fillMaxWidth(),
+      borderBrush = Brush.linearGradient(
+        listOf(GoldHighlight.copy(alpha = 0.5f), DarkSurface)
+      )
     ) {
       Column(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+          .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -132,94 +148,64 @@ fun KeyframeInspector(
         ) {
           Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
           ) {
-            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AmberZoom, modifier = Modifier.size(18.dp))
+            Cinematic3DIconContainer(
+              icon = Icons.Default.AutoAwesome,
+              contentDescription = null,
+              size = 34.dp,
+              iconSize = 18.dp,
+              gradientColors = listOf(AmberGold, GoldHighlight)
+            )
             Text("ZOOM SPLIT INSPECTOR", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
           }
 
-          Surface(
-            shape = RoundedCornerShape(6.dp),
-            color = if (selectedZoomEvent.confidence >= 0.85) EmeraldCut else AmberZoom
-          ) {
-            Text(
-              text = "${(selectedZoomEvent.confidence * 100).toInt()}% CONFIDENCE",
-              color = Color.Black,
-              fontSize = 10.sp,
-              fontWeight = FontWeight.Bold,
-              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-            )
-          }
-        }
-
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-          Column {
-            Text("Boundary Time", color = Slate400, fontSize = 11.sp)
-            Text(
-              text = "${String.format("%.3f", selectedZoomEvent.boundaryTime)}s",
-              color = CyberCyan,
-              fontSize = 15.sp,
-              fontWeight = FontWeight.Bold,
-              fontFamily = FontFamily.Monospace
-            )
-          }
-
-          Column {
-            Text("Boundary Frame", color = Slate400, fontSize = 11.sp)
-            Text(
-              text = "Frame ${selectedZoomEvent.boundaryFrame}",
-              color = Color.White,
-              fontSize = 15.sp,
-              fontWeight = FontWeight.Bold,
-              fontFamily = FontFamily.Monospace
-            )
-          }
-
-          Column {
-            Text("Curve Model", color = Slate400, fontSize = 11.sp)
-            Text(
-              text = "Cubic Ease-Out",
-              color = ElectricViolet,
-              fontSize = 13.sp,
-              fontWeight = FontWeight.SemiBold
-            )
-          }
+          GlowBadge(
+            text = "FRAME ${selectedZoomEvent.boundaryFrame}",
+            accentColor = GoldHighlight
+          )
         }
 
         if (associatedBoundary != null) {
           Text(
             text = "Trigger: ${associatedBoundary.reason}",
-            color = Slate400,
-            fontSize = 11.sp,
-            modifier = Modifier.padding(top = 2.dp)
+            color = Slate200,
+            fontSize = 12.sp
           )
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+          ) {
+            val s = associatedBoundary.scoreDetails
+            InspectorMetricPill("Semantic", "${(s.semanticCompletionScore * 100).toInt()}%", EmeraldGlow)
+            InspectorMetricPill("Punctuation", "${(s.punctuationScore * 100).toInt()}%", CyanHighlight)
+            InspectorMetricPill("Pause", "${(s.pauseScore * 100).toInt()}%", GoldHighlight)
+            InspectorMetricPill("Rhythm", "${(s.rhythmScore * 100).toInt()}%", ElectricBlueGlow)
+          }
         }
       }
     }
 
-    // Wide Scale Slider
-    Card(
-      colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-      shape = RoundedCornerShape(14.dp),
-      border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+    // Wide Scale Slider Card
+    CinematicGlassCard(
+      modifier = Modifier.fillMaxWidth(),
+      borderBrush = Brush.linearGradient(listOf(CyanHighlight.copy(alpha = 0.35f), DarkSurface))
     ) {
       Column(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+          .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
         Row(
           modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
         ) {
-          Text("Wide Frame Scale", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+          Text("WIDE SCALE AT SPLIT MOMENT", color = Slate400, fontSize = 11.sp, fontWeight = FontWeight.Bold)
           Text(
-            text = "${String.format("%.2f", selectedZoomEvent.wideScale)}x (Ref: 0.70x)",
-            color = AmberZoom,
+            text = "${String.format("%.2f", selectedZoomEvent.wideScale)}x",
+            color = CyanHighlight,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace
@@ -230,36 +216,43 @@ fun KeyframeInspector(
           value = selectedZoomEvent.wideScale.toFloat(),
           onValueChange = { onUpdateScale(it.toDouble()) },
           valueRange = 0.50f..0.90f,
+          steps = 8,
           colors = SliderDefaults.colors(
-            thumbColor = AmberZoom,
-            activeTrackColor = AmberZoom,
-            inactiveTrackColor = Slate700
+            thumbColor = CyanHighlight,
+            activeTrackColor = CyanHighlight,
+            inactiveTrackColor = Slate800
           ),
-          modifier = Modifier.testTag("wide_scale_slider")
+          modifier = Modifier.testTag("scale_slider")
+        )
+
+        Text(
+          text = "Calibrated default: 0.70x. Smaller scale yields wider field of view.",
+          color = Slate500,
+          fontSize = 11.sp
         )
       }
     }
 
-    // Zoom Recovery Duration Slider
-    Card(
-      colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-      shape = RoundedCornerShape(14.dp),
-      border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+    // Recovery Duration Slider Card
+    CinematicGlassCard(
+      modifier = Modifier.fillMaxWidth(),
+      borderBrush = Brush.linearGradient(listOf(NeonPurpleGlow.copy(alpha = 0.35f), DarkSurface))
     ) {
       Column(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+          .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
         Row(
           modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
         ) {
-          Text("Zoom-In Duration", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+          Text("RECOVERY DURATION (FRAMES)", color = Slate400, fontSize = 11.sp, fontWeight = FontWeight.Bold)
           Text(
-            text = "${selectedZoomEvent.durationFrames} Frames (~${(selectedZoomEvent.durationFrames * 41.6).toInt()}ms)",
-            color = CyberCyan,
+            text = "${selectedZoomEvent.durationFrames} Frames",
+            color = NeonPurpleGlow,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace
@@ -270,79 +263,57 @@ fun KeyframeInspector(
           value = selectedZoomEvent.durationFrames.toFloat(),
           onValueChange = { onUpdateDuration(it.toInt()) },
           valueRange = 6f..24f,
-          steps = 8,
+          steps = 9,
           colors = SliderDefaults.colors(
-            thumbColor = CyberCyan,
-            activeTrackColor = CyberCyan,
-            inactiveTrackColor = Slate700
+            thumbColor = NeonPurpleGlow,
+            activeTrackColor = NeonPurpleGlow,
+            inactiveTrackColor = Slate800
           ),
-          modifier = Modifier.testTag("zoom_duration_slider")
+          modifier = Modifier.testTag("duration_slider")
+        )
+
+        Text(
+          text = "Calibrated default: 10 frames (~0.42s at 24fps) with Cubic Ease-Out recovery.",
+          color = Slate500,
+          fontSize = 11.sp
         )
       }
     }
 
-    // Linguistic Score Breakdown
-    if (associatedBoundary != null) {
-      val scores = associatedBoundary.scoreDetails
-      Card(
-        colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-        shape = RoundedCornerShape(14.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
-      ) {
-        Column(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(14.dp),
-          verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-          Text("AI BOUNDARY METRICS", color = Slate400, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-
-          MetricBar(label = "Semantic Completion", score = scores.semanticCompletionScore, color = EmeraldCut)
-          MetricBar(label = "Punctuation & Syntax", score = scores.punctuationScore, color = CyberCyan)
-          MetricBar(label = "Acoustic Pause Gap", score = scores.pauseScore, color = AmberZoom)
-          MetricBar(label = "Speaking Rhythm Cadence", score = scores.rhythmScore, color = ElectricIndigo)
-        }
-      }
-    }
-
-    // Delete Zoom Event Action
-    Button(
-      onClick = onDeleteEvent,
-      colors = ButtonDefaults.buttonColors(
-        containerColor = Color.Red.copy(alpha = 0.15f),
-        contentColor = Color.Red
-      ),
-      shape = RoundedCornerShape(10.dp),
+    // Delete Split Button
+    Box(
       modifier = Modifier
         .fillMaxWidth()
-        .border(1.dp, Color.Red.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
-        .testTag("inspector_delete_button")
+        .clip(RoundedCornerShape(12.dp))
+        .background(Color(0xFF7F1D1D).copy(alpha = 0.4f))
+        .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+        .clickable(onClick = onDeleteEvent)
+        .padding(vertical = 12.dp),
+      contentAlignment = Alignment.Center
     ) {
-      Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-      Spacer(Modifier.width(8.dp))
-      Text("Remove Split Marker", fontWeight = FontWeight.Bold)
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+      ) {
+        Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text("DELETE THIS ZOOM SPLIT", color = Color(0xFFEF4444), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+      }
     }
   }
 }
 
 @Composable
-private fun MetricBar(label: String, score: Double, color: Color) {
-  Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-      Text(label, color = Color.White, fontSize = 11.sp)
-      Text("${(score * 100).toInt()}%", color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-    }
-    LinearProgressIndicator(
-      progress = { score.toFloat() },
-      modifier = Modifier
-        .fillMaxWidth()
-        .height(5.dp)
-        .clip(RoundedCornerShape(3.dp)),
-      color = color,
-      trackColor = Slate800
-    )
+private fun InspectorMetricPill(label: String, value: String, color: Color) {
+  Column(
+    modifier = Modifier
+      .clip(RoundedCornerShape(8.dp))
+      .background(DarkSurface)
+      .border(0.5.dp, color.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+      .padding(horizontal = 8.dp, vertical = 4.dp),
+    horizontalAlignment = Alignment.CenterHorizontally
+  ) {
+    Text(label, color = Slate500, fontSize = 9.sp)
+    Text(value, color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
   }
 }
