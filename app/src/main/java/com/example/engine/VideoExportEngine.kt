@@ -332,10 +332,16 @@ object VideoExportEngine {
     // Step 31: Automated Final Validation
     val validation = validateExport(context, outputFile, timeline)
     if (!validation.isValid) {
+      val friendlyError = "File validation failed: ${validation.report}"
       return@withContext ExportResult(
         success = false,
         outputPath = outputFile.absolutePath,
-        error = "Validation failed: ${validation.report}"
+        error = friendlyError,
+        validationReport = buildString {
+          appendLine("• Container Status: FAILED INTEGRITY CHECKS")
+          appendLine("• Reason: ${validation.report}")
+          appendLine("• Remediation: Check encoder settings or try 720p resolution.")
+        }
       )
     }
 
@@ -346,19 +352,33 @@ object VideoExportEngine {
       displayName = exportFileName
     )
 
+    if (mediaStoreResult.isFailure) {
+      val cause = mediaStoreResult.exceptionOrNull()?.localizedMessage ?: "Unknown storage I/O error"
+      val friendlyStorageError = "MediaStore insertion failed: Unable to save video to 'Movies/CutsZoom AI'. Please check device storage space and media permissions."
+      return@withContext ExportResult(
+        success = false,
+        outputPath = outputFile.absolutePath,
+        error = friendlyStorageError,
+        validationReport = buildString {
+          append(validation.report)
+          appendLine("• MediaStore Persistence: FAILED")
+          appendLine("• Error Details: $cause")
+          appendLine("• Target Location: Movies/CutsZoom AI/$exportFileName")
+          appendLine("• Remediation: Free up device storage or verify media write permissions.")
+        }
+      )
+    }
+
+    val mediaStoreUri = mediaStoreResult.getOrNull()
     val finalContentUri = ExportStorageManager.getShareableContentUri(
       context = context,
       localFile = outputFile,
-      mediaStoreUriString = mediaStoreResult.getOrNull()?.toString()
+      mediaStoreUriString = mediaStoreUri?.toString()
     )
 
     val finalReport = buildString {
       append(validation.report)
-      if (mediaStoreResult.isSuccess) {
-        appendLine("• Media Storage: Persisted to Movies/CutsZoom AI/ (Scoped Storage)")
-      } else {
-        appendLine("• Media Storage: Saved locally (FileProvider content://)")
-      }
+      appendLine("• Media Storage: Persisted to Movies/CutsZoom AI/ (Scoped Storage)")
       appendLine("• Content URI: $finalContentUri")
     }
 

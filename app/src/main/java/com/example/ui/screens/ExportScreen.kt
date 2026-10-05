@@ -345,13 +345,44 @@ fun ExportScreen(
       }
     }
 
-    // Export Finished Result & Validation Report (RENDER COMPLETE, ✓ Video ready)
+    // Export Finished Result & Validation Report (RENDER COMPLETE / RENDER FAILED)
     if (exportResult != null) {
+      val isSuccess = exportResult.success
+
+      // Determine specific error categories and actionable guidance
+      val (categoryBadge, categoryColor, userFriendlyAdvice) = if (!isSuccess) {
+        val errText = (exportResult.error ?: "") + " " + (exportResult.validationReport ?: "")
+        when {
+          errText.contains("MediaStore", ignoreCase = true) || errText.contains("storage", ignoreCase = true) -> Triple(
+            "MEDIASTORE STORAGE ERROR",
+            AmberGold,
+            "The video was rendered successfully, but Android could not save it to your Movies folder. Please check that your device has sufficient free storage space and that media permissions are enabled."
+          )
+          errText.contains("validation", ignoreCase = true) || errText.contains("empty", ignoreCase = true) || errText.contains("missing", ignoreCase = true) -> Triple(
+            "FILE INTEGRITY FAILED",
+            Color(0xFFFF5252),
+            "The generated MP4 file did not pass validation checks (file was empty or missing streams). Try selecting 720p or standard resolution and export again."
+          )
+          errText.contains("encoder", ignoreCase = true) || errText.contains("codec", ignoreCase = true) || errText.contains("hardware", ignoreCase = true) -> Triple(
+            "HARDWARE ENCODER ERROR",
+            Color(0xFFFF7043),
+            "The device hardware H.264 video encoder encountered an issue processing frames. Try lowering the target resolution to 720x1280 in Export Settings."
+          )
+          else -> Triple(
+            "EXPORT FAILED",
+            Color(0xFFFF5252),
+            exportResult.error ?: "An unexpected error interrupted the video export process. Please check settings and retry."
+          )
+        }
+      } else {
+        Triple("VALIDATED & SAVED", EmeraldGlow, "")
+      }
+
       CinematicGlassCard(
         modifier = Modifier.fillMaxWidth(),
         borderBrush = Brush.linearGradient(
           listOf(
-            if (exportResult.success) EmeraldGlow else Color.Red,
+            if (isSuccess) EmeraldGlow else categoryColor,
             Color.Transparent
           )
         )
@@ -372,35 +403,64 @@ fun ExportScreen(
               horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
               Icon(
-                imageVector = if (exportResult.success) Icons.Default.Verified else Icons.Default.Error,
+                imageVector = if (isSuccess) Icons.Default.Verified else Icons.Default.Error,
                 contentDescription = null,
-                tint = if (exportResult.success) EmeraldGlow else Color.Red,
+                tint = if (isSuccess) EmeraldGlow else categoryColor,
                 modifier = Modifier.size(24.dp)
               )
               Column {
                 Text(
-                  text = if (exportResult.success) "RENDER COMPLETE" else "RENDER FAILED",
+                  text = if (isSuccess) "RENDER COMPLETE" else "RENDER FAILED",
                   color = Color.White,
                   fontSize = 14.sp,
                   fontWeight = FontWeight.Bold
                 )
-                if (exportResult.success) {
-                  Text(
-                    text = "✓ Video ready",
-                    color = EmeraldGlow,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                  )
-                }
+                Text(
+                  text = if (isSuccess) "✓ Video ready in Movies/CutsZoom AI" else "Action required",
+                  color = if (isSuccess) EmeraldGlow else categoryColor,
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold
+                )
               }
             }
 
-            if (exportResult.success) {
-              GlowBadge(text = "VALIDATED", accentColor = EmeraldGlow)
+            GlowBadge(
+              text = categoryBadge,
+              accentColor = if (isSuccess) EmeraldGlow else categoryColor
+            )
+          }
+
+          // User-friendly advice banner for failures
+          if (!isSuccess) {
+            Box(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(DarkVoid)
+                .border(1.dp, categoryColor.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                .padding(12.dp)
+            ) {
+              Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                  text = "TROUBLESHOOTING GUIDANCE",
+                  color = categoryColor,
+                  fontSize = 10.sp,
+                  fontWeight = FontWeight.ExtraBold,
+                  letterSpacing = 0.5.sp
+                )
+                Text(
+                  text = userFriendlyAdvice,
+                  color = Color.White,
+                  fontSize = 12.sp,
+                  lineHeight = 17.sp
+                )
+              }
             }
           }
 
-          if (exportResult.validationReport != null) {
+          // Validation / Diagnostic Report Box
+          val reportText = exportResult.validationReport ?: exportResult.error
+          if (reportText != null) {
             Box(
               modifier = Modifier
                 .fillMaxWidth()
@@ -409,17 +469,25 @@ fun ExportScreen(
                 .border(0.5.dp, Slate800, RoundedCornerShape(10.dp))
                 .padding(12.dp)
             ) {
-              Text(
-                text = exportResult.validationReport,
-                color = CyanHighlight,
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-                lineHeight = 15.sp
-              )
+              Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                  text = if (isSuccess) "VALIDATION REPORT" else "DIAGNOSTIC DETAILS",
+                  color = Slate400,
+                  fontSize = 9.sp,
+                  fontWeight = FontWeight.Bold
+                )
+                Text(
+                  text = reportText,
+                  color = if (isSuccess) CyanHighlight else Color(0xFFFFB4AB),
+                  fontSize = 10.sp,
+                  fontFamily = FontFamily.Monospace,
+                  lineHeight = 15.sp
+                )
+              }
             }
           }
 
-          if (exportResult.success) {
+          if (isSuccess) {
             val contentUri = androidx.compose.runtime.remember(exportResult) {
               val uriStr = exportResult.outputUri
               if (uriStr != null && uriStr.startsWith("content://")) {
@@ -445,9 +513,12 @@ fun ExportScreen(
                   .clickable {
                     if (contentUri != null) {
                       Toast.makeText(context, "Saved to Movies/CutsZoom AI/", Toast.LENGTH_SHORT).show()
-                      ExportStorageManager.openVideo(context, contentUri)
+                      val openResult = ExportStorageManager.openVideo(context, contentUri)
+                      if (openResult.isFailure) {
+                        Toast.makeText(context, "Could not open video. Please verify default video player app.", Toast.LENGTH_SHORT).show()
+                      }
                     } else {
-                      Toast.makeText(context, "Exported video could not be opened. Please try again.", Toast.LENGTH_SHORT).show()
+                      Toast.makeText(context, "Exported video could not be found. Please retry export.", Toast.LENGTH_SHORT).show()
                     }
                   }
                   .padding(vertical = 12.dp)
@@ -475,10 +546,10 @@ fun ExportScreen(
                     if (contentUri != null) {
                       val shareResult = ExportStorageManager.shareVideo(context, contentUri)
                       if (shareResult.isFailure) {
-                        Toast.makeText(context, "Exported video could not be shared. Please try again.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Could not share video. Ensure a compatible video app (e.g. WhatsApp, Drive, Files) is installed.", Toast.LENGTH_LONG).show()
                       }
                     } else {
-                      Toast.makeText(context, "Exported video could not be shared. Please try again.", Toast.LENGTH_SHORT).show()
+                      Toast.makeText(context, "Exported video is not ready for sharing. Please retry export.", Toast.LENGTH_SHORT).show()
                     }
                   }
                   .padding(vertical = 12.dp)
@@ -493,6 +564,28 @@ fun ExportScreen(
                   Spacer(Modifier.width(6.dp))
                   Text("SHARE EXPORTED VIDEO", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
+              }
+            }
+          } else {
+            // Failure State: Direct Retry Button
+            Box(
+              modifier = Modifier
+                .fillMaxWidth()
+                .shadow(8.dp, RoundedCornerShape(14.dp), spotColor = categoryColor)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Brush.horizontalGradient(listOf(categoryColor.copy(alpha = 0.8f), categoryColor)))
+                .clickable(onClick = onStartExport)
+                .padding(vertical = 12.dp)
+                .testTag("retry_export_button"),
+              contentAlignment = Alignment.Center
+            ) {
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+              ) {
+                Icon(Icons.Default.Error, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("RETRY EXPORT", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
               }
             }
           }
