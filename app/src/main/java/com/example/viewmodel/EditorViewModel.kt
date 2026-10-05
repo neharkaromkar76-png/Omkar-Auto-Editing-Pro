@@ -275,8 +275,9 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     val clampedMs = timeMs.coerceIn(0L, meta.durationMs)
     _currentTimeMs.value = clampedMs
 
+    val fps = meta.previewFps
     val timeSec = clampedMs / 1000.0
-    val frame = (timeSec * meta.fps).roundToLong()
+    val frame = (timeSec * fps).roundToLong()
     _currentFrame.value = frame
 
     val currentTl = _timeline.value
@@ -289,38 +290,36 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
   }
 
-  fun togglePlayPause() {
-    if (_isPlaying.value) {
-      pausePlayback()
-    } else {
-      startPlayback()
+  fun onPreviewPositionUpdate(posMs: Long) {
+    val meta = _mediaMetadata.value ?: return
+    val clampedMs = posMs.coerceIn(0L, meta.durationMs)
+    _currentTimeMs.value = clampedMs
+
+    val fps = meta.previewFps
+    val timeSec = clampedMs / 1000.0
+    val frame = (timeSec * fps).roundToLong()
+    _currentFrame.value = frame
+
+    val currentTl = _timeline.value
+    if (currentTl != null) {
+      _currentScale.value = KeyframeEngine.getScaleAtFrame(
+        frame = frame,
+        zoomEvents = currentTl.zoomEvents,
+        normalScale = currentTl.styleProfile.normalScale
+      )
     }
   }
 
-  private fun startPlayback() {
-    val meta = _mediaMetadata.value ?: return
-    _isPlaying.value = true
-    playbackJob?.cancel()
+  fun setPlaying(playing: Boolean) {
+    _isPlaying.value = playing
+  }
 
-    playbackJob = viewModelScope.launch {
-      val frameIntervalMs = 33L // ~30fps preview loop
-      while (_isPlaying.value) {
-        val nextMs = _currentTimeMs.value + frameIntervalMs
-        if (nextMs >= meta.durationMs) {
-          seekTo(0L)
-          pausePlayback()
-          break
-        }
-        seekTo(nextMs)
-        delay(frameIntervalMs)
-      }
-    }
+  fun togglePlayPause() {
+    _isPlaying.value = !_isPlaying.value
   }
 
   fun pausePlayback() {
     _isPlaying.value = false
-    playbackJob?.cancel()
-    playbackJob = null
   }
 
   fun selectZoomEvent(event: ZoomEvent?) {

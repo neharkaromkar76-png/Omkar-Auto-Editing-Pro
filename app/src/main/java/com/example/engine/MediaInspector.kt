@@ -115,12 +115,20 @@ object MediaInspector {
 
     val durSec = durationMs / 1000.0
 
+    // Normalize anomalous or excessively high frame rate (e.g. 121 fps)
+    val normalizedFps = when {
+      fps <= 0.0 -> 24.024
+      fps >= 100.0 -> 30.0
+      fps > 60.0 -> 60.0
+      else -> fps
+    }
+
     return MediaMetadata(
       uri = uri.toString(),
       displayName = displayName,
       durationMs = durationMs,
       durationSeconds = durSec,
-      fps = fps,
+      fps = normalizedFps,
       width = width,
       height = height,
       rotation = rotation,

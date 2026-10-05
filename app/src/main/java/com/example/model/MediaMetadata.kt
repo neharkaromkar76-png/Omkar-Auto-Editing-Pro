@@ -27,4 +27,10 @@ data class MediaMetadata(
 
   val totalFrames: Long
     get() = (durationSeconds * fps).toLong().coerceAtLeast(1L)
+
+  val previewFps: Double
+    get() = fps.coerceIn(24.0, 30.0)
+
+  val exportFps: Double
+    get() = fps.coerceIn(24.0, 60.0)
 }

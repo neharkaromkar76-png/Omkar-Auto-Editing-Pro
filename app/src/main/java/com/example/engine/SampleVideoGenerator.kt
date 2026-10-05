@@ -17,14 +17,47 @@ import kotlin.math.sin
 
 object SampleVideoGenerator {
 
+  private fun findFFmpegBinary(): String? {
+    val candidates = listOf("/usr/bin/ffmpeg", "/system/bin/ffmpeg", "ffmpeg")
+    for (bin in candidates) {
+      try {
+        val proc = ProcessBuilder(bin, "-version").start()
+        if (proc.waitFor() == 0) return bin
+      } catch (_: Exception) {}
+    }
+    return null
+  }
+
   /**
-   * Generates a real vertical 9:16 MP4 video sample with speech timestamps
-   * and clean visual composition for testing and initial demonstration.
+   * Generates a real vertical 9:16 MP4 video sample with audio and clean timestamps
+   * for testing and immediate demonstration.
    */
   suspend fun getOrCreateSampleVideo(context: Context): Uri = withContext(Dispatchers.IO) {
     val sampleFile = File(context.filesDir, "sample_speech_reference.mp4")
     if (sampleFile.exists() && sampleFile.length() > 50000) {
       return@withContext Uri.fromFile(sampleFile)
+    }
+
+    // Attempt generation with host FFmpeg if available
+    val ffmpegBin = findFFmpegBinary()
+    if (ffmpegBin != null) {
+      try {
+        val cmd = arrayOf(
+          ffmpegBin, "-y",
+          "-f", "lavfi", "-i", "testsrc=duration=12:size=540x960:rate=24",
+          "-f", "lavfi", "-i", "sine=frequency=440:duration=12",
+          "-c:v", "libx264", "-preset", "ultrafast",
+          "-pix_fmt", "yuv420p",
+          "-c:a", "aac", "-b:a", "128k",
+          "-movflags", "+faststart",
+          sampleFile.absolutePath
+        )
+        val proc = ProcessBuilder(*cmd).redirectErrorStream(true).start()
+        val exitCode = proc.waitFor()
+        if (exitCode == 0 && sampleFile.exists() && sampleFile.length() > 1000) {
+          return@withContext Uri.fromFile(sampleFile)
+        }
+      } catch (_: Exception) {}
     }
 
     val width = 540
@@ -84,20 +117,16 @@ object SampleVideoGenerator {
         // Render frame to input surface
         val canvas: Canvas? = inputSurface.lockHardwareCanvas()
         if (canvas != null) {
-          // Dynamic deep blue-violet cinematic background
           canvas.drawColor(Color.rgb(15, 23, 42))
 
-          // Studio vertical card
           paint.color = Color.rgb(30, 41, 59)
           val cardRect = RectF(40f, 100f, (width - 40).toFloat(), (height - 100).toFloat())
           canvas.drawRoundRect(cardRect, 32f, 32f, paint)
 
-          // Center presenter avatar placeholder
           paint.color = Color.rgb(99, 102, 241)
           val avatarY = height * 0.38f
           canvas.drawCircle(width / 2f, avatarY, 110f, paint)
 
-          // Inner facial silhouette
           paint.color = Color.WHITE
           canvas.drawCircle(width / 2f, avatarY - 20f, 40f, paint)
           canvas.drawRoundRect(
@@ -105,7 +134,6 @@ object SampleVideoGenerator {
             30f, 30f, paint
           )
 
-          // Header badge
           paint.color = Color.rgb(16, 185, 129)
           canvas.drawRoundRect(
             RectF(width / 2f - 140f, 140f, width / 2f + 140f, 190f),
@@ -119,7 +147,6 @@ object SampleVideoGenerator {
           }
           canvas.drawText("AI SPEECH CALIBRATION", width / 2f, 174f, badgePaint)
 
-          // Subtitle card with current sentence
           paint.color = Color.rgb(15, 23, 42)
           val subRect = RectF(60f, height * 0.65f, (width - 60).toFloat(), height * 0.78f)
           canvas.drawRoundRect(subRect, 20f, 20f, paint)
@@ -132,7 +159,6 @@ object SampleVideoGenerator {
             subTextPaint
           )
 
-          // Waveform bar graphics at bottom
           paint.color = Color.rgb(129, 140, 248)
           for (b in 0 until 24) {
             val bx = 80f + (b * 16f)
@@ -158,6 +184,8 @@ object SampleVideoGenerator {
             if (encodedData != null && bufferInfo.size > 0 && muxerStarted) {
               encodedData.position(bufferInfo.offset)
               encodedData.limit(bufferInfo.offset + bufferInfo.size)
+              // Crucial: normalize presentation timestamp so PTS starts at 0, not system uptime!
+              bufferInfo.presentationTimeUs = (frameIndex * 1000000L / fps)
               muxer.writeSampleData(trackIndex, encodedData, bufferInfo)
             }
             encoder.releaseOutputBuffer(outputIndex, false)
@@ -169,7 +197,6 @@ object SampleVideoGenerator {
 
       encoder.signalEndOfInputStream()
 
-      // Drain remaining EOS
       var eos = false
       while (!eos) {
         val outputIndex = encoder.dequeueOutputBuffer(bufferInfo, 10000)
@@ -181,6 +208,7 @@ object SampleVideoGenerator {
           if (encodedData != null && bufferInfo.size > 0 && muxerStarted) {
             encodedData.position(bufferInfo.offset)
             encodedData.limit(bufferInfo.offset + bufferInfo.size)
+            bufferInfo.presentationTimeUs = (totalFrames * 1000000L / fps)
             muxer.writeSampleData(trackIndex, encodedData, bufferInfo)
           }
           encoder.releaseOutputBuffer(outputIndex, false)
@@ -192,14 +220,8 @@ object SampleVideoGenerator {
     } catch (e: Exception) {
       e.printStackTrace()
     } finally {
-      try {
-        encoder?.stop()
-        encoder?.release()
-      } catch (_: Exception) {}
-      try {
-        muxer?.stop()
-        muxer?.release()
-      } catch (_: Exception) {}
+      try { encoder?.stop(); encoder?.release() } catch (_: Exception) {}
+      try { muxer?.stop(); muxer?.release() } catch (_: Exception) {}
     }
 
     return@withContext Uri.fromFile(sampleFile)
