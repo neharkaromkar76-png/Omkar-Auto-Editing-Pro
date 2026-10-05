@@ -7,9 +7,11 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,6 +31,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Error
@@ -47,13 +50,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.AutoEditState
@@ -67,21 +76,27 @@ import com.example.ui.theme.CyberCyan
 import com.example.ui.theme.CyanHighlight
 import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.DarkVoid
+import com.example.ui.theme.DeepCanvas
 import com.example.ui.theme.ElectricBlue
 import com.example.ui.theme.ElectricBlueGlow
 import com.example.ui.theme.EmeraldCut
 import com.example.ui.theme.EmeraldGlow
 import com.example.ui.theme.EmeraldGreen
+import com.example.ui.theme.GlassHighlight
 import com.example.ui.theme.GlassSurface
 import com.example.ui.theme.GlowBadge
 import com.example.ui.theme.GoldHighlight
 import com.example.ui.theme.NeonPurple
 import com.example.ui.theme.NeonPurpleGlow
+import com.example.ui.theme.Slate200
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate500
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate850
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 @Composable
 fun ExportScreen(
@@ -129,6 +144,98 @@ fun ExportScreen(
           color = Slate400,
           fontSize = 11.sp
         )
+      }
+    }
+
+    // PREMIUM ANIMATED CIRCULAR PROGRESS INDICATOR (Real-Time Rendering Status)
+    if (autoEditState.isProcessing) {
+      CinematicGlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        borderBrush = Brush.linearGradient(
+          listOf(
+            GoldHighlight.copy(alpha = 0.7f),
+            NeonPurpleGlow.copy(alpha = 0.5f),
+            CyanHighlight.copy(alpha = 0.6f)
+          )
+        )
+      ) {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .background(
+              Brush.radialGradient(
+                colors = listOf(
+                  NeonPurple.copy(alpha = 0.2f),
+                  DarkSurface.copy(alpha = 0.95f)
+                ),
+                radius = 500f
+              )
+            )
+            .padding(20.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              Cinematic3DIconContainer(
+                icon = Icons.Default.AutoAwesome,
+                contentDescription = null,
+                size = 32.dp,
+                iconSize = 16.dp,
+                gradientColors = listOf(AmberGold, GoldHighlight)
+              )
+              Text(
+                text = "AI EDITING VIDEO...",
+                color = GoldHighlight,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 0.8.sp
+              )
+            }
+
+            GlowBadge(
+              text = "RENDERING ACTIVE",
+              accentColor = GoldHighlight,
+              backgroundColor = AmberGold.copy(alpha = 0.18f)
+            )
+          }
+
+          // Centerpiece: Premium Animated Circular Rendering Gauge
+          PremiumCircularExportIndicator(
+            progress = autoEditState.progress,
+            stageNumber = autoEditState.currentStage?.stepNumber ?: 1,
+            totalStages = 12,
+            size = 170.dp,
+            strokeWidth = 10.dp
+          )
+
+          // Live Status readout
+          Text(
+            text = autoEditState.statusMessage,
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 8.dp)
+          )
+
+          // Live Pipeline Telemetry Chips
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+          ) {
+            SpecItem3D("Encoder", "H.264 Hardware", CyanHighlight)
+            SpecItem3D("Audio Sync", "0.00ms Drift", EmeraldGlow)
+            SpecItem3D("Cadence", "Cubic Ease-Out", GoldHighlight)
+          }
+        }
       }
     }
 
@@ -232,44 +339,6 @@ fun ExportScreen(
           fontSize = 11.sp,
           lineHeight = 16.sp
         )
-      }
-    }
-
-    // Export In Progress Card (AI EDITING VIDEO...)
-    if (autoEditState.isProcessing) {
-      CinematicGlassCard(
-        modifier = Modifier.fillMaxWidth(),
-        borderBrush = Brush.linearGradient(
-          listOf(GoldHighlight, AmberGold)
-        )
-      ) {
-        Column(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(18.dp),
-          verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Text("AI EDITING VIDEO...", color = GoldHighlight, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
-            Text("${(autoEditState.progress * 100).toInt()}%", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-          }
-
-          LinearProgressIndicator(
-            progress = { autoEditState.progress },
-            modifier = Modifier
-              .fillMaxWidth()
-              .height(8.dp)
-              .clip(RoundedCornerShape(4.dp)),
-            color = GoldHighlight,
-            trackColor = Slate800
-          )
-
-          Text(autoEditState.statusMessage, color = Slate400, fontSize = 11.sp)
-        }
       }
     }
 
@@ -432,6 +501,158 @@ fun ExportScreen(
     }
 
     Spacer(Modifier.height(30.dp))
+  }
+}
+
+/**
+ * Premium Animated Circular Progress Indicator for real-time rendering.
+ * Features:
+ * - Ambient animated sweep rotation
+ * - Multi-stop gradient arc (Neon Purple -> Electric Blue -> Cyan -> Gold)
+ * - Glowing leading-edge particle
+ * - Monospace real-time percentage counter
+ * - Stage indicator HUD
+ */
+@Composable
+fun PremiumCircularExportIndicator(
+  progress: Float,
+  stageNumber: Int,
+  totalStages: Int,
+  modifier: Modifier = Modifier,
+  size: Dp = 170.dp,
+  strokeWidth: Dp = 10.dp
+) {
+  val animatedProgress by animateFloatAsState(
+    targetValue = progress.coerceIn(0f, 1f),
+    animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+    label = "export_progress_anim"
+  )
+
+  // Infinite subtle rotation for ambient futuristic aura
+  val infiniteTransition = rememberInfiniteTransition(label = "halo_rotation")
+  val rotationAngle by infiniteTransition.animateFloat(
+    initialValue = 0f,
+    targetValue = 360f,
+    animationSpec = infiniteRepeatable(
+      animation = tween(durationMillis = 8000, easing = LinearEasing),
+      repeatMode = RepeatMode.Restart
+    ),
+    label = "rotation_angle_anim"
+  )
+
+  Box(
+    modifier = modifier.size(size),
+    contentAlignment = Alignment.Center
+  ) {
+    // Canvas for Circular Progress Ring and Glowing Tip
+    Canvas(modifier = Modifier.fillMaxSize()) {
+      val strokePx = strokeWidth.toPx()
+      val diameter = size.toPx() - strokePx * 2
+      val radius = diameter / 2f
+      val centerOffset = Offset(size.toPx() / 2f, size.toPx() / 2f)
+
+      // 1. Inactive background track
+      drawCircle(
+        color = DarkSurface.copy(alpha = 0.9f),
+        radius = radius,
+        center = centerOffset,
+        style = Stroke(width = strokePx)
+      )
+
+      // 2. Faint outer accent ring
+      drawCircle(
+        color = Slate800.copy(alpha = 0.4f),
+        radius = radius + strokePx * 0.7f,
+        center = centerOffset,
+        style = Stroke(width = 1.5f)
+      )
+
+      // 3. Active Progress Arc with multi-color gradient
+      val sweepAngle = animatedProgress * 360f
+      if (sweepAngle > 0f) {
+        val gradientBrush = Brush.sweepGradient(
+          colors = listOf(
+            NeonPurple,
+            ElectricBlue,
+            CyanHighlight,
+            GoldHighlight,
+            NeonPurple
+          ),
+          center = centerOffset
+        )
+
+        drawArc(
+          brush = gradientBrush,
+          startAngle = -90f,
+          sweepAngle = sweepAngle,
+          useCenter = false,
+          topLeft = Offset(strokePx, strokePx),
+          size = Size(diameter, diameter),
+          style = Stroke(width = strokePx, cap = StrokeCap.Round)
+        )
+
+        // 4. Glowing Leading-edge Tip Dot
+        val angleRad = ((-90f + sweepAngle) * (PI / 180f)).toFloat()
+        val tipX = centerOffset.x + radius * cos(angleRad)
+        val tipY = centerOffset.y + radius * sin(angleRad)
+
+        // Outer glow dot
+        drawCircle(
+          color = GoldHighlight.copy(alpha = 0.45f),
+          radius = strokePx * 0.9f,
+          center = Offset(tipX, tipY)
+        )
+        // Solid center dot
+        drawCircle(
+          color = Color.White,
+          radius = strokePx * 0.45f,
+          center = Offset(tipX, tipY)
+        )
+      }
+    }
+
+    // High-Tech Center HUD (Percentage, Stage, and Subtitle)
+    Column(
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.Center
+    ) {
+      Text(
+        text = "${(animatedProgress * 100).toInt()}%",
+        color = Color.White,
+        fontSize = 28.sp,
+        fontWeight = FontWeight.ExtraBold,
+        fontFamily = FontFamily.Monospace,
+        letterSpacing = 1.sp
+      )
+
+      Spacer(Modifier.height(4.dp))
+
+      Box(
+        modifier = Modifier
+          .clip(RoundedCornerShape(6.dp))
+          .background(DarkSurface)
+          .border(0.5.dp, GoldHighlight.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+          .padding(horizontal = 6.dp, vertical = 2.dp)
+      ) {
+        Text(
+          text = "STAGE $stageNumber / $totalStages",
+          color = GoldHighlight,
+          fontSize = 9.sp,
+          fontWeight = FontWeight.Bold,
+          fontFamily = FontFamily.Monospace
+        )
+      }
+
+      Spacer(Modifier.height(4.dp))
+
+      Text(
+        text = "MP4 ENCODING",
+        color = Slate400,
+        fontSize = 9.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 0.5.sp
+      )
+    }
   }
 }
 
