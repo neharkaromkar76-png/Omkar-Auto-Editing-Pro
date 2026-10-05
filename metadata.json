@@ -1,0 +1,6 @@
+{
+  "name": "CutsZoom AI",
+  "description": "Premium AI Video Editor that detects natural speech boundaries and applies calibrated wide-frame zoom cuts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
