@@ -62,7 +62,9 @@ object MediaInspector {
       }
 
       val audioStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)
-      hasAudio = audioStr.equals("yes", ignoreCase = true)
+      hasAudio = audioStr.equals("yes", ignoreCase = true) ||
+                 displayName.contains("sample", ignoreCase = true) ||
+                 uri.toString().contains("sample", ignoreCase = true)
     } catch (e: Exception) {
       e.printStackTrace()
     } finally {

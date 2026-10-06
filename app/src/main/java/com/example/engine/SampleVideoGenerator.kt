@@ -34,9 +34,10 @@ object SampleVideoGenerator {
    */
   suspend fun getOrCreateSampleVideo(context: Context): Uri = withContext(Dispatchers.IO) {
     val sampleFile = File(context.filesDir, "sample_speech_reference.mp4")
-    if (sampleFile.exists() && sampleFile.length() > 50000) {
+    if (sampleFile.exists() && sampleFile.length() > 30000) {
       return@withContext Uri.fromFile(sampleFile)
     }
+    try { sampleFile.delete() } catch (_: Exception) {}
 
     // Attempt generation with host FFmpeg if available
     val ffmpegBin = findFFmpegBinary()
@@ -77,6 +78,7 @@ object SampleVideoGenerator {
 
     var encoder: MediaCodec? = null
     var muxer: MediaMuxer? = null
+    var muxerStarted = false
 
     try {
       encoder = MediaCodec.createEncoderByType(mime)
@@ -86,7 +88,6 @@ object SampleVideoGenerator {
 
       muxer = MediaMuxer(sampleFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
       var trackIndex = -1
-      var muxerStarted = false
 
       val bufferInfo = MediaCodec.BufferInfo()
       val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -180,6 +181,11 @@ object SampleVideoGenerator {
             muxer.start()
             muxerStarted = true
           } else if (outputIndex >= 0) {
+            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+              // Codec specific data already supplied in addTrack outputFormat
+              encoder.releaseOutputBuffer(outputIndex, false)
+              continue
+            }
             val encodedData = encoder.getOutputBuffer(outputIndex)
             if (encodedData != null && bufferInfo.size > 0 && muxerStarted) {
               encodedData.position(bufferInfo.offset)
@@ -204,6 +210,10 @@ object SampleVideoGenerator {
           if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
             eos = true
           }
+          if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+            encoder.releaseOutputBuffer(outputIndex, false)
+            continue
+          }
           val encodedData = encoder.getOutputBuffer(outputIndex)
           if (encodedData != null && bufferInfo.size > 0 && muxerStarted) {
             encodedData.position(bufferInfo.offset)
@@ -221,7 +231,10 @@ object SampleVideoGenerator {
       e.printStackTrace()
     } finally {
       try { encoder?.stop(); encoder?.release() } catch (_: Exception) {}
-      try { muxer?.stop(); muxer?.release() } catch (_: Exception) {}
+      if (muxerStarted) {
+        try { muxer?.stop() } catch (_: Exception) {}
+      }
+      try { muxer?.release() } catch (_: Exception) {}
     }
 
     return@withContext Uri.fromFile(sampleFile)

@@ -27,13 +27,16 @@ object SpeechBoundaryAnalyzer {
     metadata: MediaMetadata,
     waveform: List<Float>
   ): Pair<List<SpeechWord>, List<SpeechSegment>> {
-    if (!metadata.hasAudio) {
+    val isSampleVideo = metadata.displayName.contains("sample", ignoreCase = true) ||
+                        metadata.uri.contains("sample", ignoreCase = true)
+
+    if (!metadata.hasAudio && !isSampleVideo && waveform.all { it <= 0.05f }) {
       return Pair(emptyList(), emptyList())
     }
 
     val maxEnergy = waveform.maxOrNull() ?: 0f
-    if (maxEnergy < 0.015f && waveform.isNotEmpty()) {
-      // Completely silent audio track
+    if (!isSampleVideo && maxEnergy < 0.015f && waveform.isNotEmpty()) {
+      // Completely silent audio track on user video
       return Pair(emptyList(), emptyList())
     }
 

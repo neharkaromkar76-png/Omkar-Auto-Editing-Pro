@@ -380,6 +380,11 @@ object VideoExportEngine {
         val rawPts = videoExtractor.sampleTime
         if (firstVideoPts < 0) firstVideoPts = rawPts
 
+        if ((videoExtractor.sampleFlags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+          videoExtractor.advance()
+          continue
+        }
+
         bufferInfo.offset = 0
         bufferInfo.size = sampleSize
         bufferInfo.presentationTimeUs = (rawPts - firstVideoPts).coerceAtLeast(0L)
@@ -401,6 +406,11 @@ object VideoExportEngine {
           val rawPts = audioExtractor.sampleTime
           if (firstAudioPts < 0) firstAudioPts = rawPts
 
+          if ((audioExtractor.sampleFlags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+            audioExtractor.advance()
+            continue
+          }
+
           bufferInfo.offset = 0
           bufferInfo.size = sampleSize
           bufferInfo.presentationTimeUs = (rawPts - firstAudioPts).coerceAtLeast(0L)
@@ -411,13 +421,14 @@ object VideoExportEngine {
         }
       }
 
+      try { muxer.stop() } catch (_: Exception) {}
       return ExportResult(success = true)
     } catch (e: Exception) {
       return ExportResult(success = false, error = "MediaCodec rendering failed: ${e.message}")
     } finally {
       try { videoExtractor.release() } catch (_: Exception) {}
       try { audioExtractor.release() } catch (_: Exception) {}
-      try { muxer?.stop(); muxer?.release() } catch (_: Exception) {}
+      try { muxer?.release() } catch (_: Exception) {}
     }
   }
 
