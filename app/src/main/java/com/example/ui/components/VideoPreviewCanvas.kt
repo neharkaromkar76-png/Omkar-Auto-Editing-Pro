@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import android.net.Uri
+import android.view.LayoutInflater
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Pause
@@ -57,7 +59,9 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import com.example.R
 import com.example.engine.KeyframeEngine
+import com.example.model.EditTimeline
 import com.example.model.MediaMetadata
 import com.example.model.ZoomKeyframe
 import com.example.ui.theme.AmberGold
@@ -85,6 +89,7 @@ import kotlin.math.abs
 @Composable
 fun VideoPreviewCanvas(
   metadata: MediaMetadata?,
+  timeline: EditTimeline? = null,
   keyframes: List<ZoomKeyframe> = emptyList(),
   currentScale: Double = 1.0,
   currentTimeMs: Long,
@@ -97,6 +102,7 @@ fun VideoPreviewCanvas(
   val context = LocalContext.current
   val uriString = metadata?.uri ?: ""
   var isFullscreenMode by remember { mutableStateOf(false) }
+  var showDebugStatus by remember { mutableStateOf(true) }
 
   // Hardware-accelerated single ExoPlayer instance per active preview
   val exoPlayer = remember(context) {
@@ -156,10 +162,14 @@ fun VideoPreviewCanvas(
     }
   }
 
-  // Consume the generated keyframe list directly in the playback controller
-  // applying 1.00x -> 0.70x -> 1.00x at the precise detected speech boundary timestamps with ease-out
-  val activeScale = remember(currentTimeMs, keyframes, currentScale) {
-    if (keyframes.isNotEmpty()) {
+  // Consume the canonical timeline & keyframes list directly in the playback controller
+  // applying 1.00x -> 0.70x -> 1.00x at detected speech boundary timestamps with smooth ease-out
+  val activeScale = remember(currentTimeMs, timeline, keyframes, currentScale) {
+    if (timeline != null && timeline.zoomEvents.isNotEmpty()) {
+      val timeSec = currentTimeMs / 1000.0
+      val fps = metadata?.previewFps ?: 24.0
+      KeyframeEngine.getScaleAtTime(timeSec, fps, timeline.zoomEvents, timeline.styleProfile.normalScale)
+    } else if (keyframes.isNotEmpty()) {
       val timeSec = currentTimeMs / 1000.0
       KeyframeEngine.getScaleFromKeyframes(timeSec, keyframes, normalScale = 1.00)
     } else {
@@ -220,6 +230,7 @@ fun VideoPreviewCanvas(
       contentAlignment = Alignment.Center
     ) {
       // Hardware Video Layer with dynamic keyframe zoom applied directly on GPU compositor
+      // Using TextureView surface allows Compose graphicsLayer scaleX & scaleY to physically zoom the video
       Box(
         modifier = Modifier
           .fillMaxSize()
@@ -233,11 +244,9 @@ fun VideoPreviewCanvas(
             .fillMaxSize()
             .testTag("video_player_surface"),
           factory = { ctx ->
-            PlayerView(ctx).apply {
-              player = exoPlayer
-              useController = false
-              setBackgroundColor(android.graphics.Color.BLACK)
-            }
+            val view = LayoutInflater.from(ctx).inflate(R.layout.view_exo_player, null) as PlayerView
+            view.player = exoPlayer
+            view
           },
           update = { playerView ->
             if (playerView.player != exoPlayer) {
@@ -372,23 +381,108 @@ fun VideoPreviewCanvas(
         }
       }
 
-      // Bottom Right Fullscreen Toggle
-      IconButton(
-        onClick = { isFullscreenMode = !isFullscreenMode },
+      // Requirement 11: AUTO EDIT STATUS Debug Information Panel
+      AnimatedVisibility(
+        visible = showDebugStatus,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = Modifier
+          .align(Alignment.BottomStart)
+          .padding(start = 12.dp, bottom = 48.dp)
+      ) {
+        Box(
+          modifier = Modifier
+            .shadow(12.dp, RoundedCornerShape(10.dp), spotColor = Color.Black)
+            .clip(RoundedCornerShape(10.dp))
+            .background(DarkVoid.copy(alpha = 0.88f))
+            .border(1.dp, NeonPurpleGlow.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .testTag("auto_edit_debug_panel")
+        ) {
+          Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+              text = "AUTO EDIT STATUS",
+              color = CyberCyan,
+              fontSize = 9.sp,
+              fontWeight = FontWeight.ExtraBold,
+              fontFamily = FontFamily.Monospace,
+              letterSpacing = 0.6.sp
+            )
+            val fpsText = metadata?.fps?.let { String.format(Locale.US, "%.1f", it) } ?: "24.0"
+            val durText = metadata?.durationSeconds?.let { String.format(Locale.US, "%.1fs", it) } ?: "0.0s"
+            val audioText = if (metadata?.hasAudio == true) "YES" else "NO"
+            val wordCount = timeline?.segments?.sumOf { it.words.size } ?: 0
+            val bCount = timeline?.boundaries?.size ?: 0
+            val zoomCount = timeline?.zoomEvents?.size ?: 0
+            val kCount = timeline?.zoomEvents?.sumOf { it.keyframes.size } ?: 0
+
+            Text(
+              text = "Media: $fpsText FPS | $durText | Aud: $audioText",
+              color = Slate400,
+              fontSize = 8.5.sp,
+              fontFamily = FontFamily.Monospace
+            )
+            Text(
+              text = "AI: Words: $wordCount | Bounds: $bCount",
+              color = Slate400,
+              fontSize = 8.5.sp,
+              fontFamily = FontFamily.Monospace
+            )
+            Text(
+              text = "Timeline: Zooms: $zoomCount | Keyframes: $kCount",
+              color = Slate400,
+              fontSize = 8.5.sp,
+              fontFamily = FontFamily.Monospace
+            )
+            Text(
+              text = "Preview: Active Zoom: ${String.format(Locale.US, "%.2f", activeScale)}x",
+              color = if (isZoomedOut) GoldHighlight else EmeraldGlow,
+              fontSize = 8.5.sp,
+              fontWeight = FontWeight.Bold,
+              fontFamily = FontFamily.Monospace
+            )
+          }
+        }
+      }
+
+      // Bottom Right Controls (Fullscreen & Debug HUD toggle)
+      Row(
         modifier = Modifier
           .align(Alignment.BottomEnd)
-          .padding(8.dp)
-          .size(34.dp)
-          .background(DarkSurface.copy(alpha = 0.7f), CircleShape)
-          .border(0.5.dp, GlassHighlight, CircleShape)
-          .testTag("fullscreen_toggle_btn")
+          .padding(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
       ) {
-        Icon(
-          imageVector = if (isFullscreenMode) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-          contentDescription = "Toggle Fullscreen",
-          tint = Color.White,
-          modifier = Modifier.size(18.dp)
-        )
+        IconButton(
+          onClick = { showDebugStatus = !showDebugStatus },
+          modifier = Modifier
+            .size(34.dp)
+            .background(DarkSurface.copy(alpha = 0.7f), CircleShape)
+            .border(0.5.dp, GlassHighlight, CircleShape)
+            .testTag("debug_hud_toggle_btn")
+        ) {
+          Icon(
+            imageVector = Icons.Default.BugReport,
+            contentDescription = "Toggle Debug Status",
+            tint = if (showDebugStatus) CyberCyan else Slate400,
+            modifier = Modifier.size(16.dp)
+          )
+        }
+
+        IconButton(
+          onClick = { isFullscreenMode = !isFullscreenMode },
+          modifier = Modifier
+            .size(34.dp)
+            .background(DarkSurface.copy(alpha = 0.7f), CircleShape)
+            .border(0.5.dp, GlassHighlight, CircleShape)
+            .testTag("fullscreen_toggle_btn")
+        ) {
+          Icon(
+            imageVector = if (isFullscreenMode) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+            contentDescription = "Toggle Fullscreen",
+            tint = Color.White,
+            modifier = Modifier.size(18.dp)
+          )
+        }
       }
     }
   }

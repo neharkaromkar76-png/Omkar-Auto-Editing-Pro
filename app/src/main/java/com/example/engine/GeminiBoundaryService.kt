@@ -1,12 +1,10 @@
 package com.example.engine
 
+import android.util.Log
 import com.example.BuildConfig
 import com.example.model.BoundaryScoreDetails
 import com.example.model.SpeechBoundary
-import com.example.model.SpeechSegment
 import com.example.model.SpeechWord
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -15,19 +13,18 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToLong
 
 object GeminiBoundaryService {
 
-  private val client = OkHttpClient.Builder()
-    .connectTimeout(60, TimeUnit.SECONDS)
-    .readTimeout(60, TimeUnit.SECONDS)
-    .writeTimeout(60, TimeUnit.SECONDS)
-    .build()
+  private const val TAG = "GeminiBoundaryService"
 
-  private val moshi = Moshi.Builder()
-    .addLast(KotlinJsonAdapterFactory())
+  private val client = OkHttpClient.Builder()
+    .connectTimeout(15, TimeUnit.SECONDS)
+    .readTimeout(20, TimeUnit.SECONDS)
+    .writeTimeout(15, TimeUnit.SECONDS)
     .build()
 
   suspend fun analyzeBoundariesWithGemini(
@@ -54,7 +51,7 @@ object GeminiBoundaryService {
       1. Create a boundary ONLY when the speaker has naturally completed a sentence or meaningful phrase.
       2. Analyze: sentence completion, phrase completion, punctuation, pauses, speaker cadence, and thought conclusion.
       3. NEVER split in the middle of a sentence, middle of a word, or immediately after a filler word ('uh', 'um', 'like').
-      4. DO NOT split after every word or at fixed time intervals.
+      4. DO NOT use fixed timestamps (e.g. 2s, 3s, 5s). Timestamps must be based on the actual speech word times provided.
       5. Closely spaced boundaries (e.g. 0.5s - 1.5s apart) ARE PERMITTED when natural speech cadence requires it.
       6. Provide scores (0.0 to 1.0) for: pauseScore, punctuationScore, semanticCompletionScore, rhythmScore, speechBoundaryScore, and combined boundaryConfidence.
       
@@ -72,83 +69,93 @@ object GeminiBoundaryService {
       - "speechBoundaryScore": (number)
     """.trimIndent()
 
-    try {
-      val requestBodyJson = JSONObject().apply {
-        put("contents", JSONArray().apply {
-          put(JSONObject().apply {
-            put("parts", JSONArray().apply {
-              put(JSONObject().apply {
-                put("text", prompt)
+    val models = listOf("gemini-3.5-flash", "gemini-3.1-flash-lite-preview")
+
+    for (model in models) {
+      try {
+        val requestBodyJson = JSONObject().apply {
+          put("contents", JSONArray().apply {
+            put(JSONObject().apply {
+              put("parts", JSONArray().apply {
+                put(JSONObject().apply {
+                  put("text", prompt)
+                })
               })
             })
           })
-        })
-        put("generationConfig", JSONObject().apply {
-          put("responseMimeType", "application/json")
-          put("temperature", 0.2)
-        })
-      }
+          put("generationConfig", JSONObject().apply {
+            put("responseMimeType", "application/json")
+            put("temperature", 0.2)
+          })
+        }
 
-      val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=$apiKey"
-      val request = Request.Builder()
-        .url(url)
-        .post(requestBodyJson.toString().toRequestBody("application/json".toMediaType()))
-        .build()
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+        val request = Request.Builder()
+          .url(url)
+          .post(requestBodyJson.toString().toRequestBody("application/json".toMediaType()))
+          .build()
 
-      val response = client.newCall(request).execute()
-      if (!response.isSuccessful) {
-        return@withContext null
-      }
+        val response = client.newCall(request).execute()
+        if (!response.isSuccessful) {
+          Log.w(TAG, "Gemini model $model returned HTTP ${response.code}")
+          continue
+        }
 
-      val responseString = response.body?.string() ?: return@withContext null
-      val jsonResponse = JSONObject(responseString)
-      val candidates = jsonResponse.optJSONArray("candidates") ?: return@withContext null
-      if (candidates.length() == 0) return@withContext null
+        val responseString = response.body?.string() ?: continue
+        val jsonResponse = JSONObject(responseString)
+        val candidates = jsonResponse.optJSONArray("candidates") ?: continue
+        if (candidates.length() == 0) continue
 
-      val content = candidates.getJSONObject(0).optJSONObject("content") ?: return@withContext null
-      val parts = content.optJSONArray("parts") ?: return@withContext null
-      if (parts.length() == 0) return@withContext null
+        val content = candidates.getJSONObject(0).optJSONObject("content") ?: continue
+        val parts = content.optJSONArray("parts") ?: continue
+        if (parts.length() == 0) continue
 
-      val text = parts.getJSONObject(0).optString("text")
-      val jsonArray = JSONArray(text)
-      val boundaries = mutableListOf<SpeechBoundary>()
+        val text = parts.getJSONObject(0).optString("text")
+        val jsonArray = JSONArray(text)
+        val boundaries = mutableListOf<SpeechBoundary>()
 
-      for (i in 0 until jsonArray.length()) {
-        val obj = jsonArray.getJSONObject(i)
-        val time = obj.optDouble("time", -1.0)
-        if (time <= 0.0 || time >= videoDuration) continue
+        for (i in 0 until jsonArray.length()) {
+          val obj = jsonArray.getJSONObject(i)
+          val time = obj.optDouble("time", -1.0)
+          if (time <= 0.35 || time >= videoDuration - 0.35 || time.isNaN() || time.isInfinite()) continue
 
-        val confidence = obj.optDouble("confidence", 0.90).coerceIn(0.1, 1.0)
-        val reason = obj.optString("reason", "Semantic phrase boundary")
-        val pauseScore = obj.optDouble("pauseScore", 0.90)
-        val punctScore = obj.optDouble("punctuationScore", 0.95)
-        val semScore = obj.optDouble("semanticCompletionScore", 0.95)
-        val rhythmScore = obj.optDouble("rhythmScore", 0.88)
-        val speechScore = obj.optDouble("speechBoundaryScore", 0.92)
+          val confidence = obj.optDouble("confidence", 0.90).coerceIn(0.1, 1.0)
+          val reason = obj.optString("reason", "Semantic sentence completion")
+          val pauseScore = obj.optDouble("pauseScore", 0.90)
+          val punctScore = obj.optDouble("punctuationScore", 0.95)
+          val semScore = obj.optDouble("semanticCompletionScore", 0.95)
+          val rhythmScore = obj.optDouble("rhythmScore", 0.88)
+          val speechScore = obj.optDouble("speechBoundaryScore", 0.92)
 
-        val frame = (time * fps).roundToLong()
-        boundaries.add(
-          SpeechBoundary(
-            time = time,
-            frame = frame,
-            boundaryConfidence = confidence,
-            scoreDetails = BoundaryScoreDetails(
-              pauseScore = pauseScore,
-              punctuationScore = punctScore,
-              semanticCompletionScore = semScore,
-              rhythmScore = rhythmScore,
-              speechBoundaryScore = speechScore
-            ),
-            reason = reason,
-            isApproved = confidence >= 0.70
+          val frame = (time * fps).roundToLong()
+          boundaries.add(
+            SpeechBoundary(
+              id = UUID.randomUUID().toString(),
+              time = time,
+              frame = frame,
+              boundaryConfidence = confidence,
+              scoreDetails = BoundaryScoreDetails(
+                pauseScore = pauseScore,
+                punctuationScore = punctScore,
+                semanticCompletionScore = semScore,
+                rhythmScore = rhythmScore,
+                speechBoundaryScore = speechScore
+              ),
+              reason = reason,
+              isApproved = true // All parsed boundaries are approved for editing events
+            )
           )
-        )
-      }
+        }
 
-      boundaries.sortedBy { it.time }
-    } catch (e: Exception) {
-      e.printStackTrace()
-      null
+        if (boundaries.isNotEmpty()) {
+          Log.i(TAG, "Gemini model $model successfully returned ${boundaries.size} semantic boundaries")
+          return@withContext boundaries.sortedBy { it.time }
+        }
+      } catch (e: Exception) {
+        Log.e(TAG, "Error invoking Gemini $model: ${e.message}")
+      }
     }
+
+    null
   }
 }

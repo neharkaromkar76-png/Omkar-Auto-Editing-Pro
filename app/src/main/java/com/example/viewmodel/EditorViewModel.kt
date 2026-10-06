@@ -29,6 +29,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import android.util.Log
+import java.io.File
+import java.io.FileOutputStream
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.roundToLong
@@ -117,7 +119,36 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
   fun loadUserVideo(uri: Uri) {
     viewModelScope.launch {
-      loadVideo(uri, isSample = false)
+      val context = getApplication<Application>()
+      _autoEditState.value = AutoEditState(
+        isProcessing = true,
+        currentStage = ProcessingStage.UPLOADING,
+        progress = 0.05f,
+        statusMessage = "Importing selected video..."
+      )
+
+      val localUri = try {
+        if (uri.scheme == "file") {
+          uri
+        } else {
+          val cachedFile = File(context.cacheDir, "imported_source_${System.currentTimeMillis()}.mp4")
+          context.contentResolver.openInputStream(uri)?.use { input ->
+            java.io.FileOutputStream(cachedFile).use { output ->
+              input.copyTo(output)
+            }
+          }
+          if (cachedFile.exists() && cachedFile.length() > 0) {
+            Uri.fromFile(cachedFile)
+          } else {
+            uri
+          }
+        }
+      } catch (e: Exception) {
+        e.printStackTrace()
+        uri
+      }
+
+      loadVideo(localUri, isSample = false)
     }
   }
 
@@ -173,7 +204,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         progress = ProcessingStage.UPLOADING.baseProgress,
         statusMessage = "Validating media stream..."
       )
-      delay(150)
+      delay(100)
 
       _autoEditState.value = AutoEditState(
         isProcessing = true,
@@ -181,7 +212,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         progress = ProcessingStage.INSPECTING.baseProgress,
         statusMessage = "Media: ${metadata.width}x${metadata.height} @ ${String.format("%.2f", metadata.fps)} FPS (${metadata.durationSeconds}s)"
       )
-      delay(150)
+      delay(100)
 
       _autoEditState.value = AutoEditState(
         isProcessing = true,
@@ -195,7 +226,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _waveform.value
       }
       _waveform.value = wf
-      delay(200)
+      delay(150)
 
       _autoEditState.value = AutoEditState(
         isProcessing = true,
@@ -218,7 +249,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         Log.e("CUTSZOOM_PIPELINE", "STT returned 0 words. Stopping pipeline: $errorMessage")
         return@launch
       }
-      delay(200)
+      delay(150)
 
       _autoEditState.value = AutoEditState(
         isProcessing = true,
@@ -226,7 +257,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         progress = ProcessingStage.DETECTING_TIMESTAMPS.baseProgress,
         statusMessage = "Extracted ${words.size} word timestamps & inter-word acoustic pauses..."
       )
-      delay(200)
+      delay(150)
 
       _autoEditState.value = AutoEditState(
         isProcessing = true,
@@ -241,7 +272,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         styleProfile = _styleProfile.value,
         customApiKey = _customApiKey.value.takeIf { it.isNotBlank() }
       )
-      delay(250)
+      delay(200)
 
       _autoEditState.value = AutoEditState(
         isProcessing = true,
@@ -249,7 +280,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         progress = ProcessingStage.CALCULATING_CONFIDENCE.baseProgress,
         statusMessage = "Scored ${detectedBoundaries.size} boundaries across 5 linguistic metrics..."
       )
-      delay(200)
+      delay(150)
 
       _autoEditState.value = AutoEditState(
         isProcessing = true,
@@ -264,25 +295,37 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         boundaries = detectedBoundaries,
         styleProfile = _styleProfile.value
       )
-      delay(200)
+      delay(150)
 
       val totalKeyframes = timelineObj.zoomEvents.sumOf { it.keyframes.size }
+      val firstBoundary = detectedBoundaries.firstOrNull()?.let { String.format(Locale.US, "%.2fs", it.time) } ?: "NONE"
+      val firstZoomEvent = timelineObj.zoomEvents.firstOrNull()?.let {
+        "Time: ${String.format(Locale.US, "%.2fs", it.boundaryTime)}, Scale: ${String.format(Locale.US, "%.2fx", it.wideScale)}"
+      } ?: "NONE"
 
-      // Mandatory Debug Information Logging (Requirement 9)
+      // Mandatory Debug Information Logging (Requirement 1, 9, 15)
       Log.i("CUTSZOOM_PIPELINE", "==================================================")
       Log.i("CUTSZOOM_PIPELINE", "VIDEO FPS: ${metadata.fps}")
       Log.i("CUTSZOOM_PIPELINE", "VIDEO DURATION: ${String.format(Locale.US, "%.2f", metadata.durationSeconds)}s")
+      Log.i("CUTSZOOM_PIPELINE", "AUDIO_PRESENT: ${if (metadata.hasAudio) "YES" else "NO"}")
+      Log.i("CUTSZOOM_PIPELINE", "TRANSCRIPT_LENGTH: ${segments.sumOf { it.text.length }}")
       Log.i("CUTSZOOM_PIPELINE", "WORD COUNT: ${words.size}")
       Log.i("CUTSZOOM_PIPELINE", "BOUNDARY COUNT: ${detectedBoundaries.size}")
       Log.i("CUTSZOOM_PIPELINE", "BOUNDARIES: ${detectedBoundaries.joinToString { String.format(Locale.US, "%.2fs", it.time) }}")
+      Log.i("CUTSZOOM_PIPELINE", "EDIT_EVENT_COUNT: ${timelineObj.zoomEvents.size}")
       Log.i("CUTSZOOM_PIPELINE", "KEYFRAME COUNT: $totalKeyframes")
+      Log.i("CUTSZOOM_PIPELINE", "FIRST_BOUNDARY: $firstBoundary")
+      Log.i("CUTSZOOM_PIPELINE", "FIRST_ZOOM_EVENT: $firstZoomEvent")
       Log.i("CUTSZOOM_PIPELINE", "==================================================")
+
       println("VIDEO FPS: ${metadata.fps}")
       println("VIDEO DURATION: ${String.format(Locale.US, "%.2f", metadata.durationSeconds)}s")
       println("WORD COUNT: ${words.size}")
       println("BOUNDARY COUNT: ${detectedBoundaries.size}")
-      println("BOUNDARIES: ${detectedBoundaries.map { String.format(Locale.US, "%.2f", it.time) }}")
+      println("EDIT_EVENT_COUNT: ${timelineObj.zoomEvents.size}")
       println("KEYFRAME COUNT: $totalKeyframes")
+      println("FIRST_BOUNDARY: $firstBoundary")
+      println("FIRST_ZOOM_EVENT: $firstZoomEvent")
 
       _autoEditState.value = AutoEditState(
         isProcessing = true,
@@ -290,7 +333,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         progress = ProcessingStage.GENERATING_KEYFRAMES.baseProgress,
         statusMessage = "Generated ${timelineObj.zoomEvents.size} calibrated zoom keyframe curves ($totalKeyframes keyframes)..."
       )
-      delay(200)
+      delay(150)
 
       _timeline.value = timelineObj
       _selectedZoomEvent.value = timelineObj.zoomEvents.firstOrNull()
@@ -319,10 +362,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     val currentTl = _timeline.value
     if (currentTl != null) {
-      val keyframes = currentTl.zoomEvents.flatMap { it.keyframes }
-      _currentScale.value = KeyframeEngine.getScaleFromKeyframes(
+      _currentScale.value = KeyframeEngine.getScaleAtTime(
         timeSeconds = timeSec,
-        keyframes = keyframes,
+        fps = fps,
+        zoomEvents = currentTl.zoomEvents,
         normalScale = currentTl.styleProfile.normalScale
       )
     }
@@ -340,10 +383,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     val currentTl = _timeline.value
     if (currentTl != null) {
-      val keyframes = currentTl.zoomEvents.flatMap { it.keyframes }
-      _currentScale.value = KeyframeEngine.getScaleFromKeyframes(
+      _currentScale.value = KeyframeEngine.getScaleAtTime(
         timeSeconds = timeSec,
-        keyframes = keyframes,
+        fps = fps,
+        zoomEvents = currentTl.zoomEvents,
         normalScale = currentTl.styleProfile.normalScale
       )
     }

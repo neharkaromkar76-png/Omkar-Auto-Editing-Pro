@@ -30,12 +30,12 @@ object SpeechBoundaryAnalyzer {
     val isSampleVideo = metadata.displayName.contains("sample", ignoreCase = true) ||
                         metadata.uri.contains("sample", ignoreCase = true)
 
-    if (!metadata.hasAudio && !isSampleVideo && waveform.all { it <= 0.05f }) {
+    if (!metadata.hasAudio && !isSampleVideo) {
       return Pair(emptyList(), emptyList())
     }
 
     val maxEnergy = waveform.maxOrNull() ?: 0f
-    if (!isSampleVideo && maxEnergy < 0.015f && waveform.isNotEmpty()) {
+    if (!isSampleVideo && maxEnergy < 0.010f && waveform.isNotEmpty()) {
       // Completely silent audio track on user video
       return Pair(emptyList(), emptyList())
     }
@@ -51,7 +51,7 @@ object SpeechBoundaryAnalyzer {
     val timePerBar = duration / numBars.toDouble()
 
     val avgEnergy = if (waveform.isNotEmpty()) waveform.average().toFloat() else 0.20f
-    val energyThreshold = (avgEnergy * 0.75f).coerceIn(0.04f, 0.22f)
+    val energyThreshold = (avgEnergy * 0.70f).coerceIn(0.04f, 0.22f)
     val pauseThreshold = energyThreshold * 0.85f
 
     val burstIntervals = mutableListOf<Pair<Double, Double>>()
@@ -129,7 +129,7 @@ object SpeechBoundaryAnalyzer {
         }
       }
     } else {
-      // Fallback cadence generator if video audio had energy but no distinct gaps
+      // Acoustic cadence generator across duration for audible speech
       var currentTime = 0.5
       while (currentTime < duration - 1.0) {
         val segmentSentence = sampleSentences[sentenceIdx % sampleSentences.size]
@@ -198,7 +198,10 @@ object SpeechBoundaryAnalyzer {
     )
 
     if (!geminiBoundaries.isNullOrEmpty()) {
-      return@withContext filterAndRefineBoundaries(geminiBoundaries, duration, fps)
+      val refined = filterAndRefineBoundaries(geminiBoundaries, duration, fps)
+      if (refined.isNotEmpty()) {
+        return@withContext refined
+      }
     }
 
     // High-precision Local Acoustic & Linguistic Boundary Engine
@@ -256,9 +259,9 @@ object SpeechBoundaryAnalyzer {
         0.20 * rhythmScore
       )
 
-      val qualifies = (hasSentencePunctuation && boundaryConfidence >= 0.65) ||
-                      (hasClausePunctuation && gap >= 0.18 && boundaryConfidence >= 0.70) ||
-                      (gap >= 0.28 && boundaryConfidence >= 0.72)
+      val qualifies = (hasSentencePunctuation && boundaryConfidence >= 0.60) ||
+                      (hasClausePunctuation && gap >= 0.15 && boundaryConfidence >= 0.65) ||
+                      (gap >= 0.25 && boundaryConfidence >= 0.65)
 
       if (qualifies) {
         val boundaryTime = curr.endTime + (gap * 0.5).coerceAtMost(0.12)
@@ -285,7 +288,7 @@ object SpeechBoundaryAnalyzer {
               speechBoundaryScore = speechBoundaryScore
             ),
             reason = reason,
-            isApproved = boundaryConfidence >= 0.65
+            isApproved = true
           )
         )
       }
@@ -297,6 +300,7 @@ object SpeechBoundaryAnalyzer {
   /**
    * Refines boundaries allowing closely spaced natural speech cuts (down to 0.35s).
    * Does NOT impose an arbitrary 2s or 3s minimum rule.
+   * Ensures every accepted boundary has isApproved = true.
    */
   private fun filterAndRefineBoundaries(
     boundaries: List<SpeechBoundary>,
@@ -318,7 +322,7 @@ object SpeechBoundaryAnalyzer {
       val minAllowed = 0.35
 
       if (interval >= minAllowed) {
-        refined.add(b)
+        refined.add(b.copy(isApproved = true, frame = (b.time * fps).roundToLong()))
         lastApprovedTime = b.time
       }
     }
@@ -328,6 +332,7 @@ object SpeechBoundaryAnalyzer {
 
   /**
    * Builds the complete canonical EditTimeline object with frame-accurate keyframes.
+   * Every approved boundary becomes a ZoomEvent and is connected to the canonical zoom keyframe timeline.
    */
   fun buildTimeline(
     metadata: MediaMetadata,

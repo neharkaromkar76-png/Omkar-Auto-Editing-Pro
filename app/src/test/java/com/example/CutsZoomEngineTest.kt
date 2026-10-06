@@ -328,4 +328,85 @@ class CutsZoomEngineTest {
     assertEquals(1.00, KeyframeEngine.getScaleFromKeyframes(boundaryTime - 1.0, keyframes), 0.001)
     assertEquals(1.00, KeyframeEngine.getScaleFromKeyframes(boundaryTime + 1.0, keyframes), 0.001)
   }
+
+  @Test
+  fun testFullEditingPipelineExecution() = runBlocking {
+    val fps = 24.0
+    val durationSeconds = 12.0
+    val metadata = MediaMetadata(
+      uri = "content://test/sample_speech_reference.mp4",
+      displayName = "sample_speech_reference.mp4",
+      durationMs = (durationSeconds * 1000).toLong(),
+      durationSeconds = durationSeconds,
+      fps = fps,
+      width = 540,
+      height = 960,
+      hasAudio = true,
+      audioChannels = 1,
+      audioSampleRate = 44100
+    )
+
+    val waveform = List(100) { i ->
+      if (i % 15 in 2..12) 0.65f else 0.08f // Alternating speech bursts & cadence pauses
+    }
+
+    // Stage 1: STT Transcription
+    val (words, segments) = SpeechBoundaryAnalyzer.transcribeVideoSpeech(metadata, waveform)
+    assertTrue("WORD_COUNT must be > 0", words.isNotEmpty())
+    assertTrue("Segments must be generated", segments.isNotEmpty())
+
+    // Stage 2: Boundary Detection
+    val boundaries = SpeechBoundaryAnalyzer.detectBoundaries(
+      words = words,
+      segments = segments,
+      metadata = metadata,
+      styleProfile = ReferenceStyleProfile()
+    )
+    assertTrue("BOUNDARY_COUNT must be > 0", boundaries.isNotEmpty())
+
+    // Stage 3: Canonical Edit Timeline & Keyframe Generation
+    val timeline = SpeechBoundaryAnalyzer.buildTimeline(
+      metadata = metadata,
+      words = words,
+      segments = segments,
+      boundaries = boundaries,
+      styleProfile = ReferenceStyleProfile()
+    )
+
+    val editEventCount = timeline.zoomEvents.size
+    val keyframeCount = timeline.zoomEvents.sumOf { it.keyframes.size }
+    val firstBoundary = boundaries.first()
+    val firstZoomEvent = timeline.zoomEvents.first()
+
+    assertTrue("EDIT_EVENT_COUNT must be > 0", editEventCount > 0)
+    assertEquals("Every accepted boundary must become an edit event", boundaries.size, editEventCount)
+    assertTrue("KEYFRAME_COUNT must be > 0", keyframeCount > 0)
+    assertEquals("Each zoom event must have 7 keyframes", editEventCount * 7, keyframeCount)
+
+    // Stage 4: Zoom Scaling Verification
+    val t = firstBoundary.time
+    val frameDur = 1.0 / fps
+    val scaleBefore = KeyframeEngine.getScaleAtTime(t - frameDur, fps, timeline.zoomEvents)
+    val scaleAtBoundary = KeyframeEngine.getScaleAtTime(t, fps, timeline.zoomEvents)
+    val scaleReturning = KeyframeEngine.getScaleAtTime(t + (4 * frameDur), fps, timeline.zoomEvents)
+    val scaleRecovered = KeyframeEngine.getScaleAtTime(t + (10 * frameDur), fps, timeline.zoomEvents)
+
+    assertEquals("Zoom scale before boundary must be 1.00x", 1.00, scaleBefore, 0.01)
+    assertEquals("Zoom scale at boundary must be 0.70x (wide zoom out)", 0.70, scaleAtBoundary, 0.01)
+    assertTrue("Zoom scale during recovery must smoothly return towards 1.00x", scaleReturning in 0.75..0.90)
+    assertEquals("Zoom scale at T+10 frames must be fully recovered to 1.00x", 1.00, scaleRecovered, 0.01)
+
+    // Stage 5: Print exact required metrics
+    println("==================================================")
+    println("PIPELINE TEST METRICS REPORT:")
+    println("FPS: ${metadata.fps}")
+    println("DURATION: ${metadata.durationSeconds}s")
+    println("WORD_COUNT: ${words.size}")
+    println("BOUNDARY_COUNT: ${boundaries.size}")
+    println("EDIT_EVENT_COUNT: $editEventCount")
+    println("KEYFRAME_COUNT: $keyframeCount")
+    println("FIRST_BOUNDARY: ${String.format(java.util.Locale.US, "%.2fs", firstBoundary.time)}")
+    println("FIRST_ZOOM_EVENT: Time: ${String.format(java.util.Locale.US, "%.2fs", firstZoomEvent.boundaryTime)}, Scale: ${String.format(java.util.Locale.US, "%.2fx", firstZoomEvent.wideScale)}")
+    println("==================================================")
+  }
 }

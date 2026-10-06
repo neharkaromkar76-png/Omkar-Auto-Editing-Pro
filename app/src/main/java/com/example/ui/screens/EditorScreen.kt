@@ -255,6 +255,7 @@ fun EditorScreen(
             // Main Studio Center: Large Video Preview Area
             VideoPreviewCanvas(
               metadata = metadata,
+              timeline = timeline,
               keyframes = timeline?.zoomEvents?.flatMap { it.keyframes } ?: emptyList(),
               currentScale = currentScale,
               currentTimeMs = currentTimeMs,

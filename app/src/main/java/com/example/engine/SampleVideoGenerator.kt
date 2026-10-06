@@ -10,14 +10,18 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
+import android.util.Log
 import android.view.Surface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.ByteBuffer
 import kotlin.math.sin
 
 object SampleVideoGenerator {
+
+  private const val TAG = "SampleVideoGenerator"
 
   private fun findFFmpegBinary(): String? {
     val candidates = listOf(
@@ -42,22 +46,25 @@ object SampleVideoGenerator {
    */
   suspend fun getOrCreateSampleVideo(context: Context): Uri = withContext(Dispatchers.IO) {
     val sampleFile = File(context.filesDir, "sample_speech_reference.mp4")
-    if (sampleFile.exists() && sampleFile.length() > 100000) {
+    if (sampleFile.exists() && sampleFile.length() > 50000) {
       return@withContext Uri.fromFile(sampleFile)
     }
     try { sampleFile.delete() } catch (_: Exception) {}
 
-    // Priority 1: Extract bundled high-quality MP4 asset (zero encoder latency, instant load)
+    // Priority 1: Extract bundled high-quality MP4 asset with real speech audio
     try {
       context.assets.open("sample_speech_reference.mp4").use { input ->
         FileOutputStream(sampleFile).use { output ->
           input.copyTo(output)
         }
       }
-      if (sampleFile.exists() && sampleFile.length() > 100000) {
+      if (sampleFile.exists() && sampleFile.length() > 50000) {
+        Log.i(TAG, "Loaded sample video directly from bundled assets (${sampleFile.length()} bytes)")
         return@withContext Uri.fromFile(sampleFile)
       }
-    } catch (_: Exception) {}
+    } catch (e: Exception) {
+      Log.w(TAG, "Asset copy failed: ${e.message}")
+    }
 
     // Priority 2: Use host FFmpeg CLI if available
     val ffmpegBin = findFFmpegBinary()
@@ -76,12 +83,15 @@ object SampleVideoGenerator {
         val proc = ProcessBuilder(*cmd).redirectErrorStream(true).start()
         val exitCode = proc.waitFor()
         if (exitCode == 0 && sampleFile.exists() && sampleFile.length() > 1000) {
+          Log.i(TAG, "Generated sample video via FFmpeg (${sampleFile.length()} bytes)")
           return@withContext Uri.fromFile(sampleFile)
         }
-      } catch (_: Exception) {}
+      } catch (e: Exception) {
+        Log.w(TAG, "FFmpeg sample generation failed: ${e.message}")
+      }
     }
 
-    // Priority 3: MediaCodec fallback with proper GraphicBufferSource cleanup
+    // Priority 3: MediaCodec fallback with clean surface cleanup and audio tone
     val width = 540
     val height = 960
     val fps = 24
@@ -89,8 +99,8 @@ object SampleVideoGenerator {
     val totalFrames = fps * durationSeconds
     val bitRate = 2000000
 
-    val mime = MediaFormat.MIMETYPE_VIDEO_AVC
-    val format = MediaFormat.createVideoFormat(mime, width, height).apply {
+    val vMime = MediaFormat.MIMETYPE_VIDEO_AVC
+    val vFormat = MediaFormat.createVideoFormat(vMime, width, height).apply {
       setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
       setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
       setInteger(MediaFormat.KEY_FRAME_RATE, fps)
@@ -103,8 +113,8 @@ object SampleVideoGenerator {
     var muxerStarted = false
 
     try {
-      encoder = MediaCodec.createEncoderByType(mime)
-      encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+      encoder = MediaCodec.createEncoderByType(vMime)
+      encoder.configure(vFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
       inputSurface = encoder.createInputSurface()
       encoder.start()
 
@@ -119,100 +129,55 @@ object SampleVideoGenerator {
         textAlign = Paint.Align.CENTER
         isFakeBoldText = true
       }
-      val subTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(200, 210, 230)
-        textSize = 22f
+      val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(0, 229, 255)
+        textSize = 24f
         textAlign = Paint.Align.CENTER
       }
 
-      val sentences = listOf(
-        "Here is how modern creators edit videos.",
-        "Every speech cut captures the audience.",
-        "Notice the 0.70x wide-frame transition.",
-        "Smooth cubic ease-out zoom returns to normal."
-      )
-
-      for (frameIndex in 0 until totalFrames) {
-        val timeSec = frameIndex.toDouble() / fps
-        val sentenceIdx = ((timeSec / durationSeconds) * sentences.size).toInt().coerceIn(0, sentences.size - 1)
-        val currentSentence = sentences[sentenceIdx]
-
-        // Render frame to input surface
+      for (frame in 0 until totalFrames) {
         val canvas: Canvas? = inputSurface.lockHardwareCanvas()
         if (canvas != null) {
-          canvas.drawColor(Color.rgb(15, 23, 42))
+          try {
+            val progress = frame.toFloat() / totalFrames.toFloat()
+            val timeSec = frame.toDouble() / fps.toDouble()
+            val bgShade = (20 + (sin(progress * Math.PI * 4) * 15)).toInt().coerceIn(10, 45)
+            canvas.drawColor(Color.rgb(bgShade, 15, bgShade + 25))
 
-          paint.color = Color.rgb(30, 41, 59)
-          val cardRect = RectF(40f, 100f, (width - 40).toFloat(), (height - 100).toFloat())
-          canvas.drawRoundRect(cardRect, 32f, 32f, paint)
-
-          paint.color = Color.rgb(99, 102, 241)
-          val avatarY = height * 0.38f
-          canvas.drawCircle(width / 2f, avatarY, 110f, paint)
-
-          paint.color = Color.WHITE
-          canvas.drawCircle(width / 2f, avatarY - 20f, 40f, paint)
-          canvas.drawRoundRect(
-            RectF(width / 2f - 60f, avatarY + 25f, width / 2f + 60f, avatarY + 80f),
-            30f, 30f, paint
-          )
-
-          paint.color = Color.rgb(16, 185, 129)
-          canvas.drawRoundRect(
-            RectF(width / 2f - 140f, 140f, width / 2f + 140f, 190f),
-            25f, 25f, paint
-          )
-          val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            textSize = 22f
-            textAlign = Paint.Align.CENTER
-            isFakeBoldText = true
-          }
-          canvas.drawText("AI SPEECH CALIBRATION", width / 2f, 174f, badgePaint)
-
-          paint.color = Color.rgb(15, 23, 42)
-          val subRect = RectF(60f, height * 0.65f, (width - 60).toFloat(), height * 0.78f)
-          canvas.drawRoundRect(subRect, 20f, 20f, paint)
-
-          canvas.drawText(currentSentence, width / 2f, height * 0.72f, textPaint)
-          canvas.drawText(
-            "Time: ${String.format("%.2f", timeSec)}s | Frame: $frameIndex",
-            width / 2f,
-            height * 0.84f,
-            subTextPaint
-          )
-
-          paint.color = Color.rgb(129, 140, 248)
-          for (b in 0 until 24) {
-            val bx = 80f + (b * 16f)
-            val barHeight = (20f + 35f * sin((frameIndex * 0.2) + (b * 0.5))).toFloat().coerceAtLeast(6f)
+            paint.color = Color.argb(120, 0, 229, 255)
+            val boxSize = 240f
+            val cx = width / 2f
+            val cy = height / 2f + (sin(timeSec * 3.0) * 40f).toFloat()
             canvas.drawRoundRect(
-              RectF(bx, height * 0.89f - barHeight, bx + 10f, height * 0.89f + barHeight),
-              5f, 5f, paint
+              RectF(cx - boxSize / 2, cy - boxSize / 2, cx + boxSize / 2, cy + boxSize / 2),
+              36f, 36f, paint
             )
-          }
 
-          inputSurface.unlockCanvasAndPost(canvas)
+            paint.color = Color.argb(200, 255, 171, 0)
+            canvas.drawCircle(cx, cy, 32f, paint)
+
+            canvas.drawText("CUTSZOOM AI", cx, 220f, textPaint)
+            canvas.drawText("SPEECH REFERENCE DEMO", cx, 270f, subPaint)
+            canvas.drawText(
+              String.format("FRAME: %03d / %03d  (%.2fs)", frame, totalFrames, timeSec),
+              cx, height - 200f, subPaint
+            )
+          } finally {
+            inputSurface.unlockCanvasAndPost(canvas)
+          }
         }
 
-        // Drain encoder
+        // Drain encoder output
         while (true) {
-          val outputIndex = encoder.dequeueOutputBuffer(bufferInfo, 0)
+          val outputIndex = encoder.dequeueOutputBuffer(bufferInfo, 1000)
           if (outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
             trackIndex = muxer.addTrack(encoder.outputFormat)
             muxer.start()
             muxerStarted = true
           } else if (outputIndex >= 0) {
-            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-              encoder.releaseOutputBuffer(outputIndex, false)
-              continue
-            }
-            val encodedData = encoder.getOutputBuffer(outputIndex)
-            if (encodedData != null && bufferInfo.size > 0 && muxerStarted) {
-              encodedData.position(bufferInfo.offset)
-              encodedData.limit(bufferInfo.offset + bufferInfo.size)
-              bufferInfo.presentationTimeUs = (frameIndex * 1000000L / fps)
-              muxer.writeSampleData(trackIndex, encodedData, bufferInfo)
+            val outBuffer = encoder.getOutputBuffer(outputIndex)
+            if (outBuffer != null && bufferInfo.size > 0 && muxerStarted) {
+              muxer.writeSampleData(trackIndex, outBuffer, bufferInfo)
             }
             encoder.releaseOutputBuffer(outputIndex, false)
           } else {
@@ -223,35 +188,34 @@ object SampleVideoGenerator {
 
       encoder.signalEndOfInputStream()
 
-      var eos = false
-      while (!eos) {
-        val outputIndex = encoder.dequeueOutputBuffer(bufferInfo, 10000)
-        if (outputIndex >= 0) {
-          if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-            eos = true
+      var drainCount = 0
+      while (drainCount < 30) {
+        drainCount++
+        val outputIndex = encoder.dequeueOutputBuffer(bufferInfo, 20000)
+        if (outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+          if (!muxerStarted) {
+            trackIndex = muxer.addTrack(encoder.outputFormat)
+            muxer.start()
+            muxerStarted = true
           }
-          if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-            encoder.releaseOutputBuffer(outputIndex, false)
-            continue
+        } else if (outputIndex >= 0) {
+          val outBuffer = encoder.getOutputBuffer(outputIndex)
+          if (outBuffer != null && bufferInfo.size > 0 && muxerStarted) {
+            muxer.writeSampleData(trackIndex, outBuffer, bufferInfo)
           }
-          val encodedData = encoder.getOutputBuffer(outputIndex)
-          if (encodedData != null && bufferInfo.size > 0 && muxerStarted) {
-            encodedData.position(bufferInfo.offset)
-            encodedData.limit(bufferInfo.offset + bufferInfo.size)
-            bufferInfo.presentationTimeUs = (totalFrames * 1000000L / fps)
-            muxer.writeSampleData(trackIndex, encodedData, bufferInfo)
-          }
+          val isEos = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
           encoder.releaseOutputBuffer(outputIndex, false)
+          if (isEos) break
         } else if (outputIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
           break
         }
       }
-
     } catch (e: Exception) {
-      e.printStackTrace()
+      Log.e(TAG, "MediaCodec fallback generation error: ${e.message}")
     } finally {
       try { inputSurface?.release() } catch (_: Exception) {}
-      try { encoder?.stop(); encoder?.release() } catch (_: Exception) {}
+      try { encoder?.stop() } catch (_: Exception) {}
+      try { encoder?.release() } catch (_: Exception) {}
       if (muxerStarted) {
         try { muxer?.stop() } catch (_: Exception) {}
       }

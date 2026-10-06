@@ -5,6 +5,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.provider.OpenableColumns
 import com.example.model.MediaMetadata
 import java.io.File
 
@@ -25,13 +26,32 @@ object MediaInspector {
     var fileSizeBytes = 0L
 
     try {
-      if (uri.scheme == "file") {
+      if (uri.scheme == "file" || (uri.path != null && uri.path!!.startsWith("/"))) {
         val file = File(uri.path ?: "")
         if (file.exists()) {
           fileSizeBytes = file.length()
           displayName = file.name
           retriever.setDataSource(file.absolutePath)
         } else {
+          retriever.setDataSource(context, uri)
+        }
+      } else if (uri.scheme == "content") {
+        try {
+          context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (cursor.moveToFirst()) {
+              if (nameIdx >= 0) displayName = cursor.getString(nameIdx) ?: "Imported Video"
+              if (sizeIdx >= 0) fileSizeBytes = cursor.getLong(sizeIdx)
+            }
+          }
+        } catch (_: Exception) {}
+
+        try {
+          context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+            retriever.setDataSource(pfd.fileDescriptor)
+          } ?: retriever.setDataSource(context, uri)
+        } catch (_: Exception) {
           retriever.setDataSource(context, uri)
         }
       } else {
@@ -76,8 +96,16 @@ object MediaInspector {
     // Inspect tracks & FPS with MediaExtractor
     val extractor = MediaExtractor()
     try {
-      if (uri.scheme == "file") {
+      if (uri.scheme == "file" || (uri.path != null && uri.path!!.startsWith("/"))) {
         extractor.setDataSource(uri.path ?: "")
+      } else if (uri.scheme == "content") {
+        try {
+          context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+            extractor.setDataSource(pfd.fileDescriptor)
+          } ?: extractor.setDataSource(context, uri, null)
+        } catch (_: Exception) {
+          extractor.setDataSource(context, uri, null)
+        }
       } else {
         extractor.setDataSource(context, uri, null)
       }
@@ -97,6 +125,9 @@ object MediaInspector {
           if (format.containsKey(MediaFormat.KEY_HEIGHT)) {
             height = format.getInteger(MediaFormat.KEY_HEIGHT)
           }
+          if (durationMs <= 0L && format.containsKey(MediaFormat.KEY_DURATION)) {
+            durationMs = format.getLong(MediaFormat.KEY_DURATION) / 1000L
+          }
         } else if (mime.startsWith("audio/")) {
           hasAudio = true
           if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
@@ -104,6 +135,9 @@ object MediaInspector {
           }
           if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
             audioSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+          }
+          if (durationMs <= 0L && format.containsKey(MediaFormat.KEY_DURATION)) {
+            durationMs = format.getLong(MediaFormat.KEY_DURATION) / 1000L
           }
         }
       }
@@ -115,7 +149,7 @@ object MediaInspector {
       } catch (_: Exception) {}
     }
 
-    val durSec = durationMs / 1000.0
+    val durSec = (durationMs / 1000.0).coerceAtLeast(0.1)
 
     // Normalize anomalous or excessively high frame rate (e.g. 121 fps)
     val normalizedFps = when {

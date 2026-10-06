@@ -223,6 +223,7 @@ object KeyframeEngine {
    *
    * Transforms 1.00x -> 0.70x at the speech boundary, followed by
    * smooth cubic ease-out recovery back to 1.00x.
+   * Resolves closely spaced and overlapping events cleanly by taking the active minimum scale.
    */
   fun getScaleFromKeyframes(
     timeSeconds: Double,
@@ -231,19 +232,27 @@ object KeyframeEngine {
   ): Double {
     if (keyframes.isEmpty()) return normalScale
 
+    // Group keyframes by boundary or evaluate across consecutive intervals
+    var minScale = normalScale
+    var foundActive = false
+
     val sorted = keyframes.sortedBy { it.timestamp }
     for (i in 0 until sorted.size - 1) {
       val k1 = sorted[i]
       val k2 = sorted[i + 1]
 
       val span = k2.timestamp - k1.timestamp
-      if (span in 0.0001..1.0 && timeSeconds in k1.timestamp..k2.timestamp) {
+      if (span in 0.0001..0.60 && timeSeconds in k1.timestamp..k2.timestamp) {
         val u = (timeSeconds - k1.timestamp) / span
         val factor = cubicEaseOut(u)
-        return k1.scale + (k2.scale - k1.scale) * factor
+        val s = k1.scale + (k2.scale - k1.scale) * factor
+        if (s < minScale) {
+          minScale = s
+          foundActive = true
+        }
       }
     }
 
-    return normalScale
+    return if (foundActive) minScale else normalScale
   }
 }
