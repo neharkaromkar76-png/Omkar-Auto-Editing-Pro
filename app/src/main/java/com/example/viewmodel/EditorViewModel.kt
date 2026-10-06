@@ -319,10 +319,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     val currentTl = _timeline.value
     if (currentTl != null) {
-      _currentScale.value = KeyframeEngine.getScaleAtTime(
+      val keyframes = currentTl.zoomEvents.flatMap { it.keyframes }
+      _currentScale.value = KeyframeEngine.getScaleFromKeyframes(
         timeSeconds = timeSec,
-        fps = currentTl.source.fps,
-        zoomEvents = currentTl.zoomEvents,
+        keyframes = keyframes,
         normalScale = currentTl.styleProfile.normalScale
       )
     }
@@ -340,10 +340,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     val currentTl = _timeline.value
     if (currentTl != null) {
-      _currentScale.value = KeyframeEngine.getScaleAtTime(
+      val keyframes = currentTl.zoomEvents.flatMap { it.keyframes }
+      _currentScale.value = KeyframeEngine.getScaleFromKeyframes(
         timeSeconds = timeSec,
-        fps = currentTl.source.fps,
-        zoomEvents = currentTl.zoomEvents,
+        keyframes = keyframes,
         normalScale = currentTl.styleProfile.normalScale
       )
     }

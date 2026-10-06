@@ -10,15 +10,23 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
+import android.view.Surface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
 import kotlin.math.sin
 
 object SampleVideoGenerator {
 
   private fun findFFmpegBinary(): String? {
-    val candidates = listOf("/usr/bin/ffmpeg", "/system/bin/ffmpeg", "ffmpeg")
+    val candidates = listOf(
+      "/usr/bin/ffmpeg",
+      "/system/bin/ffmpeg",
+      "/system/xbin/ffmpeg",
+      "/vendor/bin/ffmpeg",
+      "ffmpeg"
+    )
     for (bin in candidates) {
       try {
         val proc = ProcessBuilder(bin, "-version").start()
@@ -29,17 +37,29 @@ object SampleVideoGenerator {
   }
 
   /**
-   * Generates a real vertical 9:16 MP4 video sample with audio and clean timestamps
-   * for testing and immediate demonstration.
+   * Generates or provides the real vertical 9:16 MP4 video sample with audio
+   * and clean timestamps for testing and immediate demonstration.
    */
   suspend fun getOrCreateSampleVideo(context: Context): Uri = withContext(Dispatchers.IO) {
     val sampleFile = File(context.filesDir, "sample_speech_reference.mp4")
-    if (sampleFile.exists() && sampleFile.length() > 30000) {
+    if (sampleFile.exists() && sampleFile.length() > 100000) {
       return@withContext Uri.fromFile(sampleFile)
     }
     try { sampleFile.delete() } catch (_: Exception) {}
 
-    // Attempt generation with host FFmpeg if available
+    // Priority 1: Extract bundled high-quality MP4 asset (zero encoder latency, instant load)
+    try {
+      context.assets.open("sample_speech_reference.mp4").use { input ->
+        FileOutputStream(sampleFile).use { output ->
+          input.copyTo(output)
+        }
+      }
+      if (sampleFile.exists() && sampleFile.length() > 100000) {
+        return@withContext Uri.fromFile(sampleFile)
+      }
+    } catch (_: Exception) {}
+
+    // Priority 2: Use host FFmpeg CLI if available
     val ffmpegBin = findFFmpegBinary()
     if (ffmpegBin != null) {
       try {
@@ -61,6 +81,7 @@ object SampleVideoGenerator {
       } catch (_: Exception) {}
     }
 
+    // Priority 3: MediaCodec fallback with proper GraphicBufferSource cleanup
     val width = 540
     val height = 960
     val fps = 24
@@ -77,13 +98,14 @@ object SampleVideoGenerator {
     }
 
     var encoder: MediaCodec? = null
+    var inputSurface: Surface? = null
     var muxer: MediaMuxer? = null
     var muxerStarted = false
 
     try {
       encoder = MediaCodec.createEncoderByType(mime)
       encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-      val inputSurface = encoder.createInputSurface()
+      inputSurface = encoder.createInputSurface()
       encoder.start()
 
       muxer = MediaMuxer(sampleFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
@@ -182,7 +204,6 @@ object SampleVideoGenerator {
             muxerStarted = true
           } else if (outputIndex >= 0) {
             if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-              // Codec specific data already supplied in addTrack outputFormat
               encoder.releaseOutputBuffer(outputIndex, false)
               continue
             }
@@ -190,7 +211,6 @@ object SampleVideoGenerator {
             if (encodedData != null && bufferInfo.size > 0 && muxerStarted) {
               encodedData.position(bufferInfo.offset)
               encodedData.limit(bufferInfo.offset + bufferInfo.size)
-              // Crucial: normalize presentation timestamp so PTS starts at 0, not system uptime!
               bufferInfo.presentationTimeUs = (frameIndex * 1000000L / fps)
               muxer.writeSampleData(trackIndex, encodedData, bufferInfo)
             }
@@ -230,6 +250,7 @@ object SampleVideoGenerator {
     } catch (e: Exception) {
       e.printStackTrace()
     } finally {
+      try { inputSurface?.release() } catch (_: Exception) {}
       try { encoder?.stop(); encoder?.release() } catch (_: Exception) {}
       if (muxerStarted) {
         try { muxer?.stop() } catch (_: Exception) {}

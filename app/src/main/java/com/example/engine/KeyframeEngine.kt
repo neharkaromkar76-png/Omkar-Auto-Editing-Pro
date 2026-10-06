@@ -216,4 +216,34 @@ object KeyframeEngine {
     // For closely spaced cuts, take minimum scale (maximum zoom effect)
     return activeEvents.minOfOrNull { evaluateEventScaleAt(it, timeSeconds) } ?: normalScale
   }
+
+  /**
+   * Directly consumes the flat list of generated ZoomKeyframes and calculates
+   * the exact ease-out scale at continuous timestamp in seconds.
+   *
+   * Transforms 1.00x -> 0.70x at the speech boundary, followed by
+   * smooth cubic ease-out recovery back to 1.00x.
+   */
+  fun getScaleFromKeyframes(
+    timeSeconds: Double,
+    keyframes: List<ZoomKeyframe>,
+    normalScale: Double = 1.00
+  ): Double {
+    if (keyframes.isEmpty()) return normalScale
+
+    val sorted = keyframes.sortedBy { it.timestamp }
+    for (i in 0 until sorted.size - 1) {
+      val k1 = sorted[i]
+      val k2 = sorted[i + 1]
+
+      val span = k2.timestamp - k1.timestamp
+      if (span in 0.0001..1.0 && timeSeconds in k1.timestamp..k2.timestamp) {
+        val u = (timeSeconds - k1.timestamp) / span
+        val factor = cubicEaseOut(u)
+        return k1.scale + (k2.scale - k1.scale) * factor
+      }
+    }
+
+    return normalScale
+  }
 }

@@ -271,4 +271,61 @@ class CutsZoomEngineTest {
       assertEquals("After recovery scale should return to 1.00x", 1.00, scaleAfter, 0.001)
     }
   }
+
+  @Test
+  fun testPlaybackControllerKeyframeConsumption() {
+    val fps = 30.0
+    val frameDur = 1.0 / fps // 0.03333s
+    val boundaryTime = 4.250 // precise detected speech boundary timestamp
+    val boundary = SpeechBoundary(
+      time = boundaryTime,
+      frame = (boundaryTime * fps).toLong(),
+      boundaryConfidence = 0.96
+    )
+
+    // Generate calibrated keyframes for this boundary
+    val zoomEvent = KeyframeEngine.createZoomEvent(boundary, fps)
+    val keyframes = zoomEvent.keyframes
+    assertEquals(7, keyframes.size)
+
+    // 1. Precise check at T - 1 frame: 1.00x
+    val scaleBefore = KeyframeEngine.getScaleFromKeyframes(boundaryTime - frameDur, keyframes)
+    assertEquals(1.00, scaleBefore, 0.001)
+
+    // 2. Precise check at exact boundary timestamp T: drops to 0.70x (wide split cut)
+    val scaleAtBoundary = KeyframeEngine.getScaleFromKeyframes(boundaryTime, keyframes)
+    assertEquals(0.70, scaleAtBoundary, 0.001)
+
+    // 3. Intermediate keyframes using ease-out interpolation
+    // T + 2 frames: ~0.75x
+    val scaleAt2 = KeyframeEngine.getScaleFromKeyframes(boundaryTime + (2 * frameDur), keyframes)
+    assertEquals(0.75, scaleAt2, 0.01)
+
+    // T + 4 frames: ~0.82x
+    val scaleAt4 = KeyframeEngine.getScaleFromKeyframes(boundaryTime + (4 * frameDur), keyframes)
+    assertEquals(0.82, scaleAt4, 0.01)
+
+    // T + 6 frames: ~0.90x
+    val scaleAt6 = KeyframeEngine.getScaleFromKeyframes(boundaryTime + (6 * frameDur), keyframes)
+    assertEquals(0.90, scaleAt6, 0.01)
+
+    // T + 8 frames: ~0.96x
+    val scaleAt8 = KeyframeEngine.getScaleFromKeyframes(boundaryTime + (8 * frameDur), keyframes)
+    assertEquals(0.96, scaleAt8, 0.01)
+
+    // T + 10 frames: full 1.00x recovery
+    val scaleAt10 = KeyframeEngine.getScaleFromKeyframes(boundaryTime + (10 * frameDur), keyframes)
+    assertEquals(1.00, scaleAt10, 0.001)
+
+    // 4. Ease-out interpolation test:
+    // Scale at midpoint between T and T+2 frames should be strictly greater than linear midpoint
+    val midTime = boundaryTime + (1 * frameDur)
+    val scaleAtMid = KeyframeEngine.getScaleFromKeyframes(midTime, keyframes)
+    val linearMid = (0.70 + 0.75) / 2.0 // 0.725
+    assertTrue("Ease-out curve should rise faster than linear progression", scaleAtMid > linearMid)
+
+    // 5. Outside of event range (e.g. 1.0s before or after): normal 1.00x
+    assertEquals(1.00, KeyframeEngine.getScaleFromKeyframes(boundaryTime - 1.0, keyframes), 0.001)
+    assertEquals(1.00, KeyframeEngine.getScaleFromKeyframes(boundaryTime + 1.0, keyframes), 0.001)
+  }
 }

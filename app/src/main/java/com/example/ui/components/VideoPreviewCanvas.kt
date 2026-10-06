@@ -57,7 +57,9 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import com.example.engine.KeyframeEngine
 import com.example.model.MediaMetadata
+import com.example.model.ZoomKeyframe
 import com.example.ui.theme.AmberGold
 import com.example.ui.theme.CyanHighlight
 import com.example.ui.theme.CyberCyan
@@ -76,13 +78,15 @@ import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate500
 import com.example.ui.theme.Slate700
 import kotlinx.coroutines.delay
+import java.util.Locale
 import kotlin.math.abs
 
 @OptIn(UnstableApi::class)
 @Composable
 fun VideoPreviewCanvas(
   metadata: MediaMetadata?,
-  currentScale: Double,
+  keyframes: List<ZoomKeyframe> = emptyList(),
+  currentScale: Double = 1.0,
   currentTimeMs: Long,
   currentFrame: Long,
   isPlaying: Boolean,
@@ -152,7 +156,18 @@ fun VideoPreviewCanvas(
     }
   }
 
-  val isZoomedOut = currentScale < 0.98
+  // Consume the generated keyframe list directly in the playback controller
+  // applying 1.00x -> 0.70x -> 1.00x at the precise detected speech boundary timestamps with ease-out
+  val activeScale = remember(currentTimeMs, keyframes, currentScale) {
+    if (keyframes.isNotEmpty()) {
+      val timeSec = currentTimeMs / 1000.0
+      KeyframeEngine.getScaleFromKeyframes(timeSec, keyframes, normalScale = 1.00)
+    } else {
+      currentScale
+    }
+  }
+
+  val isZoomedOut = activeScale < 0.98
 
   // Outer 3D Cinema Stage
   Box(
@@ -209,8 +224,8 @@ fun VideoPreviewCanvas(
         modifier = Modifier
           .fillMaxSize()
           .graphicsLayer {
-            scaleX = currentScale.toFloat()
-            scaleY = currentScale.toFloat()
+            scaleX = activeScale.toFloat()
+            scaleY = activeScale.toFloat()
           }
       ) {
         AndroidView(
@@ -309,7 +324,7 @@ fun VideoPreviewCanvas(
               fontSize = 10.sp
             )
             Text(
-              text = "ZOOM ${String.format("%.2f", currentScale)}x",
+              text = "ZOOM ${String.format(Locale.US, "%.2f", activeScale)}x",
               color = if (isZoomedOut) GoldHighlight else CyanHighlight,
               fontSize = 10.sp,
               fontFamily = FontFamily.Monospace,
