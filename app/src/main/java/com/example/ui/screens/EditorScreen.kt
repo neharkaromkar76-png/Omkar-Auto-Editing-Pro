@@ -260,6 +260,7 @@ fun EditorScreen(
               currentFrame = currentFrame,
               isPlaying = isPlaying,
               onTogglePlayPause = { viewModel.togglePlayPause() },
+              onPositionUpdate = { posMs -> viewModel.onPreviewPositionUpdate(posMs) },
               modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)

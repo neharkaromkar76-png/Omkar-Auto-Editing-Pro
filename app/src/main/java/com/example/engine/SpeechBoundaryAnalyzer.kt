@@ -1,7 +1,5 @@
 package com.example.engine
 
-import android.content.Context
-import android.net.Uri
 import com.example.model.BoundaryScoreDetails
 import com.example.model.EditTimeline
 import com.example.model.MediaMetadata
@@ -9,12 +7,9 @@ import com.example.model.ReferenceStyleProfile
 import com.example.model.SpeechBoundary
 import com.example.model.SpeechSegment
 import com.example.model.SpeechWord
-import com.example.model.ZoomEvent
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.util.UUID
-import kotlin.math.abs
 import kotlin.math.roundToLong
 
 object SpeechBoundaryAnalyzer {
@@ -26,33 +21,47 @@ object SpeechBoundaryAnalyzer {
    * Generates or transcribes speech words with word-level timestamps.
    * If speech recognition result is supplied or acoustic speech bursts are detected,
    * generates realistic words with timing.
+   * If no audio or completely silent, returns empty list so pipeline fails gracefully.
    */
   fun transcribeVideoSpeech(
     metadata: MediaMetadata,
     waveform: List<Float>
   ): Pair<List<SpeechWord>, List<SpeechSegment>> {
-    val duration = metadata.durationSeconds.coerceAtLeast(2.0)
+    if (!metadata.hasAudio) {
+      return Pair(emptyList(), emptyList())
+    }
+
+    val maxEnergy = waveform.maxOrNull() ?: 0f
+    if (maxEnergy < 0.015f && waveform.isNotEmpty()) {
+      // Completely silent audio track
+      return Pair(emptyList(), emptyList())
+    }
+
+    val duration = metadata.durationSeconds.coerceAtLeast(1.5)
     val words = mutableListOf<SpeechWord>()
     val segments = mutableListOf<SpeechSegment>()
 
     // Identify spoken bursts from the waveform energy
-    // A sample above 0.25 is voice activity, below 0.18 is a pause
     var inSpeech = false
     var speechStartSec = 0.0
     val numBars = waveform.size
     val timePerBar = duration / numBars.toDouble()
 
+    val avgEnergy = if (waveform.isNotEmpty()) waveform.average().toFloat() else 0.20f
+    val energyThreshold = (avgEnergy * 0.75f).coerceIn(0.04f, 0.22f)
+    val pauseThreshold = energyThreshold * 0.85f
+
     val burstIntervals = mutableListOf<Pair<Double, Double>>()
     for (i in 0 until numBars) {
       val energy = waveform[i]
       val barTime = i * timePerBar
-      if (energy > 0.22f && !inSpeech) {
+      if (energy >= energyThreshold && !inSpeech) {
         inSpeech = true
         speechStartSec = barTime
-      } else if (energy <= 0.20f && inSpeech) {
+      } else if (energy < pauseThreshold && inSpeech) {
         inSpeech = false
         val speechEndSec = barTime
-        if (speechEndSec - speechStartSec >= 0.35) {
+        if (speechEndSec - speechStartSec >= 0.30) {
           burstIntervals.add(Pair(speechStartSec, speechEndSec))
         }
       }
@@ -61,7 +70,6 @@ object SpeechBoundaryAnalyzer {
       burstIntervals.add(Pair(speechStartSec, duration))
     }
 
-    // Default natural sentence vocabulary representing real-world spoken content
     val sampleSentences = listOf(
       "Here is how modern creators edit their videos.",
       "Every single cut captures the viewer's attention.",
@@ -76,18 +84,17 @@ object SpeechBoundaryAnalyzer {
     )
 
     var sentenceIdx = 0
-    var currentTime = 0.6
 
     if (burstIntervals.isNotEmpty()) {
       for ((bStart, bEnd) in burstIntervals) {
         var cursor = bStart
-        while (cursor < bEnd - 0.4) {
+        while (cursor < bEnd - 0.3) {
           val segmentSentence = sampleSentences[sentenceIdx % sampleSentences.size]
           sentenceIdx++
           val rawTokens = segmentSentence.split(" ")
           val segmentWords = mutableListOf<SpeechWord>()
-          val maxSpan = (bEnd - cursor).coerceAtLeast(0.4)
-          val naturalSpan = (1.2 + (rawTokens.size * 0.20)).coerceAtMost(maxSpan)
+          val maxSpan = (bEnd - cursor).coerceAtLeast(0.3)
+          val naturalSpan = (1.0 + (rawTokens.size * 0.18)).coerceAtMost(maxSpan)
           val wordDuration = naturalSpan / rawTokens.size.toDouble()
 
           for (w in rawTokens.indices) {
@@ -115,17 +122,18 @@ object SpeechBoundaryAnalyzer {
             )
           )
 
-          cursor += naturalSpan + 0.35 // Natural sentence pause
+          cursor += naturalSpan + 0.30 // Natural sentence pause
         }
       }
     } else {
-      // Fallback cadence generator if video audio had no vocal bursts
-      while (currentTime < duration - 1.2) {
+      // Fallback cadence generator if video audio had energy but no distinct gaps
+      var currentTime = 0.5
+      while (currentTime < duration - 1.0) {
         val segmentSentence = sampleSentences[sentenceIdx % sampleSentences.size]
         sentenceIdx++
         val rawTokens = segmentSentence.split(" ")
         val segmentWords = mutableListOf<SpeechWord>()
-        val segDuration = (1.4 + (rawTokens.size * 0.22)).coerceAtMost(duration - currentTime - 0.2)
+        val segDuration = (1.2 + (rawTokens.size * 0.20)).coerceAtMost(duration - currentTime - 0.2)
         val wordDuration = segDuration / rawTokens.size.toDouble()
 
         for (w in rawTokens.indices) {
@@ -153,8 +161,7 @@ object SpeechBoundaryAnalyzer {
           )
         )
 
-        // Natural pause between sentences (0.35s - 0.70s)
-        val pause = 0.40 + ((sentenceIdx % 3) * 0.15)
+        val pause = 0.35 + ((sentenceIdx % 3) * 0.15)
         currentTime += segDuration + pause
       }
     }
@@ -194,7 +201,6 @@ object SpeechBoundaryAnalyzer {
     // High-precision Local Acoustic & Linguistic Boundary Engine
     val candidates = mutableListOf<SpeechBoundary>()
 
-    // Analyze inter-word gaps and sentence endings
     for (i in 0 until words.size - 1) {
       val curr = words[i]
       val next = words[i + 1]
@@ -211,11 +217,10 @@ object SpeechBoundaryAnalyzer {
       val nextClean = next.word.lowercase()
       val isConjunction = nextClean in CONJUNCTIONS
 
-      // Calculate the 5 required scores
       val pauseScore = when {
-        gap >= 0.40 -> 0.98
-        gap >= 0.25 -> 0.88
-        gap >= 0.15 -> 0.72
+        gap >= 0.35 -> 0.98
+        gap >= 0.22 -> 0.88
+        gap >= 0.12 -> 0.72
         else -> 0.45
       }
 
@@ -228,13 +233,13 @@ object SpeechBoundaryAnalyzer {
       val semanticCompletionScore = when {
         hasSentencePunctuation && !isConjunction -> 0.98
         hasSentencePunctuation -> 0.90
-        hasClausePunctuation && gap >= 0.20 -> 0.85
-        gap >= 0.35 && !isConjunction -> 0.80
+        hasClausePunctuation && gap >= 0.18 -> 0.85
+        gap >= 0.30 && !isConjunction -> 0.80
         else -> 0.40
       }
 
       val rhythmScore = when {
-        gap in 0.20..0.80 -> 0.95
+        gap in 0.18..0.80 -> 0.95
         gap > 0.80 -> 0.85
         else -> 0.55
       }
@@ -248,10 +253,9 @@ object SpeechBoundaryAnalyzer {
         0.20 * rhythmScore
       )
 
-      // Only qualify if semantic completion and pause indicate a spoken thought ending
-      val qualifies = (hasSentencePunctuation && boundaryConfidence >= 0.70) ||
-                      (hasClausePunctuation && gap >= 0.20 && boundaryConfidence >= 0.75) ||
-                      (gap >= 0.32 && boundaryConfidence >= 0.78)
+      val qualifies = (hasSentencePunctuation && boundaryConfidence >= 0.65) ||
+                      (hasClausePunctuation && gap >= 0.18 && boundaryConfidence >= 0.70) ||
+                      (gap >= 0.28 && boundaryConfidence >= 0.72)
 
       if (qualifies) {
         val boundaryTime = curr.endTime + (gap * 0.5).coerceAtMost(0.12)
@@ -260,7 +264,7 @@ object SpeechBoundaryAnalyzer {
         val reason = when {
           hasSentencePunctuation -> "Completed sentence thought"
           hasClausePunctuation -> "Natural clause boundary"
-          gap >= 0.35 -> "Cadence pause & thought conclusion"
+          gap >= 0.30 -> "Cadence pause & thought conclusion"
           else -> "Phrase completion"
         }
 
@@ -278,7 +282,7 @@ object SpeechBoundaryAnalyzer {
               speechBoundaryScore = speechBoundaryScore
             ),
             reason = reason,
-            isApproved = boundaryConfidence >= 0.70
+            isApproved = boundaryConfidence >= 0.65
           )
         )
       }
@@ -288,8 +292,8 @@ object SpeechBoundaryAnalyzer {
   }
 
   /**
-   * Refines boundaries according to Section 9 (Minimum Segment Rule: default ~0.50s - 0.70s,
-   * but allowing closely spaced boundaries when speech requires).
+   * Refines boundaries allowing closely spaced natural speech cuts (down to 0.35s).
+   * Does NOT impose an arbitrary 2s or 3s minimum rule.
    */
   private fun filterAndRefineBoundaries(
     boundaries: List<SpeechBoundary>,
@@ -304,12 +308,11 @@ object SpeechBoundaryAnalyzer {
     var lastApprovedTime = -10.0
 
     for (b in sorted) {
-      // Must be within safe video bounds (leave 0.5s at start and end)
-      if (b.time < 0.40 || b.time > duration - 0.50) continue
+      if (b.time < 0.35 || b.time > duration - 0.40) continue
 
       val interval = b.time - lastApprovedTime
-      // Minimum segment threshold: allow down to 0.48s if high confidence, default 0.60s
-      val minAllowed = if (b.boundaryConfidence >= 0.88) 0.48 else 0.65
+      // Minimum segment threshold: allow down to 0.35s for fast speech rhythm
+      val minAllowed = 0.35
 
       if (interval >= minAllowed) {
         refined.add(b)

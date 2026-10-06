@@ -22,14 +22,14 @@ object KeyframeEngine {
    * Creates a calibrated ZoomEvent for a speech boundary according to
    * the exact frame-based keyframe model.
    *
-   * Offsets:
-   * F - 1 -> 1.00
-   * F     -> wideScale (0.70)
-   * F + 2 -> 0.75
-   * F + 4 -> 0.82
-   * F + 6 -> 0.90
-   * F + 8 -> 0.96
-   * F + 10 -> 1.00
+   * Offsets (calculated using actual video FPS):
+   * T - 1 frame -> 1.00x
+   * T           -> wideScale (0.70x)
+   * T + 2 frames -> 0.75x
+   * T + 4 frames -> 0.82x
+   * T + 6 frames -> 0.90x
+   * T + 8 frames -> 0.96x
+   * T + 10 frames -> 1.00x
    */
   fun createZoomEvent(
     boundary: SpeechBoundary,
@@ -40,7 +40,10 @@ object KeyframeEngine {
     posX: Double = 0.50,
     posY: Double = 0.50
   ): ZoomEvent {
-    val boundaryFrame = boundary.frame
+    val actualFps = fps.coerceIn(12.0, 120.0)
+    val frameDuration = 1.0 / actualFps
+    val boundaryTime = boundary.time
+    val boundaryFrame = (boundaryTime * actualFps).roundToLong()
     val wide = customWideScale ?: styleProfile.wideScale
 
     // Scaled proportions for intermediate keyframes if wideScale changes
@@ -49,7 +52,7 @@ object KeyframeEngine {
       ZoomKeyframe(
         offsetFrames = -1,
         frame = boundaryFrame - 1,
-        timestamp = (boundaryFrame - 1) / fps,
+        timestamp = boundaryTime - frameDuration,
         scale = 1.00,
         positionX = posX,
         positionY = posY
@@ -57,48 +60,48 @@ object KeyframeEngine {
       ZoomKeyframe(
         offsetFrames = 0,
         frame = boundaryFrame,
-        timestamp = boundaryFrame / fps,
-        scale = wide,
+        timestamp = boundaryTime,
+        scale = wide, // 0.70x
         positionX = posX,
         positionY = posY
       ),
       ZoomKeyframe(
         offsetFrames = 2,
         frame = boundaryFrame + 2,
-        timestamp = (boundaryFrame + 2) / fps,
-        scale = wide + (scaleRange * (0.05 / 0.30)), // ~0.75 default
+        timestamp = boundaryTime + (2 * frameDuration),
+        scale = wide + (scaleRange * (0.05 / 0.30)), // ~0.75x
         positionX = posX,
         positionY = posY
       ),
       ZoomKeyframe(
         offsetFrames = 4,
         frame = boundaryFrame + 4,
-        timestamp = (boundaryFrame + 4) / fps,
-        scale = wide + (scaleRange * (0.12 / 0.30)), // ~0.82 default
+        timestamp = boundaryTime + (4 * frameDuration),
+        scale = wide + (scaleRange * (0.12 / 0.30)), // ~0.82x
         positionX = posX,
         positionY = posY
       ),
       ZoomKeyframe(
         offsetFrames = 6,
         frame = boundaryFrame + 6,
-        timestamp = (boundaryFrame + 6) / fps,
-        scale = wide + (scaleRange * (0.20 / 0.30)), // ~0.90 default
+        timestamp = boundaryTime + (6 * frameDuration),
+        scale = wide + (scaleRange * (0.20 / 0.30)), // ~0.90x
         positionX = posX,
         positionY = posY
       ),
       ZoomKeyframe(
         offsetFrames = 8,
         frame = boundaryFrame + 8,
-        timestamp = (boundaryFrame + 8) / fps,
-        scale = wide + (scaleRange * (0.26 / 0.30)), // ~0.96 default
+        timestamp = boundaryTime + (8 * frameDuration),
+        scale = wide + (scaleRange * (0.26 / 0.30)), // ~0.96x
         positionX = posX,
         positionY = posY
       ),
       ZoomKeyframe(
         offsetFrames = durationFrames,
         frame = boundaryFrame + durationFrames,
-        timestamp = (boundaryFrame + durationFrames) / fps,
-        scale = 1.00,
+        timestamp = boundaryTime + (durationFrames * frameDuration),
+        scale = 1.00, // 1.00x recovery
         positionX = posX,
         positionY = posY
       )
@@ -106,7 +109,7 @@ object KeyframeEngine {
 
     return ZoomEvent(
       boundaryFrame = boundaryFrame,
-      boundaryTime = boundary.time,
+      boundaryTime = boundaryTime,
       normalScale = styleProfile.normalScale,
       wideScale = wide,
       durationFrames = durationFrames,
@@ -119,6 +122,34 @@ object KeyframeEngine {
   }
 
   /**
+   * Evaluates scale for a single ZoomEvent at continuous timestamp in seconds.
+   */
+  fun evaluateEventScaleAt(event: ZoomEvent, timeSeconds: Double): Double {
+    val keyframes = event.keyframes.sortedBy { it.timestamp }
+    if (keyframes.isEmpty()) return event.normalScale
+
+    val start = keyframes.first().timestamp
+    val end = keyframes.last().timestamp
+    if (timeSeconds < start || timeSeconds > end) return event.normalScale
+
+    if (timeSeconds <= start) return keyframes.first().scale
+    if (timeSeconds >= end) return keyframes.last().scale
+
+    for (i in 0 until keyframes.size - 1) {
+      val k1 = keyframes[i]
+      val k2 = keyframes[i + 1]
+      if (timeSeconds in k1.timestamp..k2.timestamp) {
+        val span = k2.timestamp - k1.timestamp
+        if (span <= 0.0) return k1.scale
+        val u = (timeSeconds - k1.timestamp) / span
+        val factor = cubicEaseOut(u)
+        return k1.scale + (k2.scale - k1.scale) * factor
+      }
+    }
+    return event.normalScale
+  }
+
+  /**
    * Deterministically calculates the scale factor at any given frame index.
    */
   fun getScaleAtFrame(
@@ -128,44 +159,40 @@ object KeyframeEngine {
   ): Double {
     if (zoomEvents.isEmpty()) return normalScale
 
-    // Find any zoom event that is active at this frame
-    // A zoom event is active from (boundaryFrame - 1) to (boundaryFrame + durationFrames)
-    // If multiple overlap, the most recently triggered boundary takes precedence
-    val activeEvent = zoomEvents
-      .filter { event ->
-        val start = event.boundaryFrame - 1
-        val end = event.boundaryFrame + event.durationFrames
-        frame in start..end
-      }
-      .maxByOrNull { it.boundaryFrame }
-
-    if (activeEvent == null) return normalScale
-
-    val keyframes = activeEvent.keyframes.sortedBy { it.frame }
-    if (keyframes.isEmpty()) return normalScale
-
-    if (frame <= keyframes.first().frame) return keyframes.first().scale
-    if (frame >= keyframes.last().frame) return keyframes.last().scale
-
-    // Find bounding keyframes
-    for (i in 0 until keyframes.size - 1) {
-      val k1 = keyframes[i]
-      val k2 = keyframes[i + 1]
-
-      if (frame in k1.frame..k2.frame) {
-        val span = (k2.frame - k1.frame).toDouble()
-        if (span <= 0.0) return k1.scale
-        val u = (frame - k1.frame).toDouble() / span
-        val factor = cubicEaseOut(u)
-        return k1.scale + (k2.scale - k1.scale) * factor
-      }
+    // Find any zoom events active at this frame
+    val activeEvents = zoomEvents.filter { event ->
+      val start = event.boundaryFrame - 1
+      val end = event.boundaryFrame + event.durationFrames
+      frame in start..end
     }
 
-    return normalScale
+    if (activeEvents.isEmpty()) return normalScale
+
+    // In case of closely spaced boundaries, take the deepest zoom (lowest scale) to honor cuts
+    return activeEvents.minOfOrNull { event ->
+      val keyframes = event.keyframes.sortedBy { it.frame }
+      if (keyframes.isEmpty()) return@minOfOrNull normalScale
+      if (frame <= keyframes.first().frame) return@minOfOrNull keyframes.first().scale
+      if (frame >= keyframes.last().frame) return@minOfOrNull keyframes.last().scale
+
+      for (i in 0 until keyframes.size - 1) {
+        val k1 = keyframes[i]
+        val k2 = keyframes[i + 1]
+        if (frame in k1.frame..k2.frame) {
+          val span = (k2.frame - k1.frame).toDouble()
+          if (span <= 0.0) return@minOfOrNull k1.scale
+          val u = (frame - k1.frame).toDouble() / span
+          val factor = cubicEaseOut(u)
+          return@minOfOrNull k1.scale + (k2.scale - k1.scale) * factor
+        }
+      }
+      normalScale
+    } ?: normalScale
   }
 
   /**
-   * Calculates scale at continuous timestamp in seconds.
+   * Calculates continuous scale at precise timestamp in seconds.
+   * Handles closely spaced boundaries smoothly without jumping.
    */
   fun getScaleAtTime(
     timeSeconds: Double,
@@ -173,7 +200,20 @@ object KeyframeEngine {
     zoomEvents: List<ZoomEvent>,
     normalScale: Double = 1.00
   ): Double {
-    val frame = (timeSeconds * fps).roundToLong()
-    return getScaleAtFrame(frame, zoomEvents, normalScale)
+    if (zoomEvents.isEmpty()) return normalScale
+
+    val actualFps = fps.coerceIn(12.0, 120.0)
+    val frameDuration = 1.0 / actualFps
+
+    val activeEvents = zoomEvents.filter { event ->
+      val start = event.boundaryTime - frameDuration
+      val end = event.boundaryTime + (event.durationFrames * frameDuration)
+      timeSeconds in start..end
+    }
+
+    if (activeEvents.isEmpty()) return normalScale
+
+    // For closely spaced cuts, take minimum scale (maximum zoom effect)
+    return activeEvents.minOfOrNull { evaluateEventScaleAt(it, timeSeconds) } ?: normalScale
   }
 }

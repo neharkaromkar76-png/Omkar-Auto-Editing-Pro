@@ -1,8 +1,7 @@
 package com.example.ui.components
 
-import android.media.MediaPlayer
 import android.net.Uri
-import android.view.TextureView
+import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -53,6 +52,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import com.example.model.MediaMetadata
 import com.example.ui.theme.AmberGold
 import com.example.ui.theme.CyanHighlight
@@ -71,8 +75,10 @@ import com.example.ui.theme.NeonPurpleGlow
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate500
 import com.example.ui.theme.Slate700
+import kotlinx.coroutines.delay
 import kotlin.math.abs
 
+@OptIn(UnstableApi::class)
 @Composable
 fun VideoPreviewCanvas(
   metadata: MediaMetadata?,
@@ -81,52 +87,69 @@ fun VideoPreviewCanvas(
   currentFrame: Long,
   isPlaying: Boolean,
   onTogglePlayPause: () -> Unit,
+  onPositionUpdate: (Long) -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
-  val mediaPlayer = remember { MediaPlayer() }
   val uriString = metadata?.uri ?: ""
   var isFullscreenMode by remember { mutableStateOf(false) }
 
-  DisposableEffect(uriString) {
-    if (uriString.isNotBlank()) {
-      try {
-        mediaPlayer.reset()
-        val uri = Uri.parse(uriString)
-        if (uri.scheme == "file") {
-          mediaPlayer.setDataSource(uri.path ?: "")
-        } else {
-          mediaPlayer.setDataSource(context, uri)
-        }
-        mediaPlayer.isLooping = true
-        mediaPlayer.prepareAsync()
-      } catch (e: Exception) {
-        e.printStackTrace()
-      }
+  // Hardware-accelerated single ExoPlayer instance per active preview
+  val exoPlayer = remember(context) {
+    ExoPlayer.Builder(context).build().apply {
+      repeatMode = Player.REPEAT_MODE_ALL
     }
+  }
+
+  DisposableEffect(exoPlayer) {
     onDispose {
       try {
-        mediaPlayer.release()
+        exoPlayer.stop()
+        exoPlayer.release()
       } catch (_: Exception) {}
     }
   }
 
+  // Set media source whenever URI changes
+  LaunchedEffect(uriString) {
+    if (uriString.isNotBlank()) {
+      try {
+        val mediaItem = MediaItem.fromUri(Uri.parse(uriString))
+        exoPlayer.setMediaItem(mediaItem)
+        exoPlayer.prepare()
+      } catch (e: Exception) {
+        e.printStackTrace()
+      }
+    }
+  }
+
+  // Play/Pause state synchronization
   LaunchedEffect(isPlaying) {
     try {
-      if (isPlaying && !mediaPlayer.isPlaying) {
-        mediaPlayer.start()
-      } else if (!isPlaying && mediaPlayer.isPlaying) {
-        mediaPlayer.pause()
+      if (isPlaying && !exoPlayer.isPlaying) {
+        exoPlayer.play()
+      } else if (!isPlaying && exoPlayer.isPlaying) {
+        exoPlayer.pause()
       }
     } catch (_: Exception) {}
   }
 
+  // Deliberate user seek handling (when paused or during user scrubbing)
   LaunchedEffect(currentTimeMs) {
     try {
-      if (abs(mediaPlayer.currentPosition - currentTimeMs) > 150) {
-        mediaPlayer.seekTo(currentTimeMs.toInt())
+      if (!isPlaying && abs(exoPlayer.currentPosition - currentTimeMs) > 100) {
+        exoPlayer.seekTo(currentTimeMs)
       }
     } catch (_: Exception) {}
+  }
+
+  // Hardware-timed position reporting loop while playing (smooth ~60fps UI playhead & zoom synchronization)
+  LaunchedEffect(isPlaying) {
+    while (isPlaying) {
+      val pos = exoPlayer.currentPosition
+      onPositionUpdate(pos)
+      delay(16) // Smooth 60fps frame updates
+    }
   }
 
   val isZoomedOut = currentScale < 0.98
@@ -181,7 +204,7 @@ fun VideoPreviewCanvas(
         ),
       contentAlignment = Alignment.Center
     ) {
-      // Hardware Video Layer with dynamic keyframe zoom
+      // Hardware Video Layer with dynamic keyframe zoom applied directly on GPU compositor
       Box(
         modifier = Modifier
           .fillMaxSize()
@@ -195,19 +218,15 @@ fun VideoPreviewCanvas(
             .fillMaxSize()
             .testTag("video_player_surface"),
           factory = { ctx ->
-            TextureView(ctx).apply {
-              surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                override fun onSurfaceTextureAvailable(surface: android.graphics.SurfaceTexture, width: Int, height: Int) {
-                  try {
-                    mediaPlayer.setSurface(android.view.Surface(surface))
-                  } catch (e: Exception) {
-                    e.printStackTrace()
-                  }
-                }
-                override fun onSurfaceTextureSizeChanged(surface: android.graphics.SurfaceTexture, width: Int, height: Int) {}
-                override fun onSurfaceTextureDestroyed(surface: android.graphics.SurfaceTexture): Boolean = true
-                override fun onSurfaceTextureUpdated(surface: android.graphics.SurfaceTexture) {}
-              }
+            PlayerView(ctx).apply {
+              player = exoPlayer
+              useController = false
+              setBackgroundColor(android.graphics.Color.BLACK)
+            }
+          },
+          update = { playerView ->
+            if (playerView.player != exoPlayer) {
+              playerView.player = exoPlayer
             }
           }
         )
@@ -241,129 +260,120 @@ fun VideoPreviewCanvas(
         }
       }
 
-      // HUD Top Overlays: Live Scale Badge, Timecode & Fullscreen button
-      Row(
+      // Live Telemetry Overlay in Top-Left (Timestamp, Frame, Real-Time Zoom Scale)
+      Box(
         modifier = Modifier
-          .fillMaxWidth()
-          .align(Alignment.TopCenter)
-          .padding(12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+          .align(Alignment.TopStart)
+          .padding(12.dp)
+          .shadow(8.dp, RoundedCornerShape(10.dp), spotColor = Color.Black)
+          .clip(RoundedCornerShape(10.dp))
+          .background(DarkVoid.copy(alpha = 0.78f))
+          .border(0.5.dp, if (isZoomedOut) GoldHighlight else GlassHighlight, RoundedCornerShape(10.dp))
+          .padding(horizontal = 10.dp, vertical = 6.dp)
+          .testTag("live_telemetry_hud")
       ) {
-        // Dynamic Zoom Scale Badge (e.g. 0.70x WIDE / 1.00x NORMAL)
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            Box(
+              modifier = Modifier
+                .size(7.dp)
+                .background(if (isPlaying) EmeraldGlow else Slate500, CircleShape)
+            )
+            val sec = currentTimeMs / 1000
+            val millis = (currentTimeMs % 1000) / 10
+            Text(
+              text = String.format("%02d:%02d.%02d", sec / 60, sec % 60, millis),
+              color = Color.White,
+              fontSize = 11.sp,
+              fontFamily = FontFamily.Monospace,
+              fontWeight = FontWeight.Bold
+            )
+          }
+
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            Text(
+              text = "F#$currentFrame",
+              color = Slate400,
+              fontSize = 10.sp,
+              fontFamily = FontFamily.Monospace
+            )
+            Text(
+              text = "•",
+              color = Slate500,
+              fontSize = 10.sp
+            )
+            Text(
+              text = "ZOOM ${String.format("%.2f", currentScale)}x",
+              color = if (isZoomedOut) GoldHighlight else CyanHighlight,
+              fontSize = 10.sp,
+              fontFamily = FontFamily.Monospace,
+              fontWeight = FontWeight.ExtraBold
+            )
+          }
+        }
+      }
+
+      // Zoom-Out Wide Indicator Badge in Top-Right
+      AnimatedVisibility(
+        visible = isZoomedOut,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = Modifier
+          .align(Alignment.TopEnd)
+          .padding(12.dp)
+      ) {
         Box(
           modifier = Modifier
-            .shadow(6.dp, RoundedCornerShape(10.dp), spotColor = if (isZoomedOut) AmberGold else EmeraldGreen)
-            .clip(RoundedCornerShape(10.dp))
-            .background(
-              if (isZoomedOut) {
-                Brush.horizontalGradient(listOf(AmberGold, GoldHighlight))
-              } else {
-                Brush.horizontalGradient(listOf(EmeraldGreen, EmeraldGlow))
-              }
-            )
-            .border(0.5.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .shadow(10.dp, RoundedCornerShape(12.dp), spotColor = AmberGold)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Brush.horizontalGradient(listOf(AmberGold, GoldHighlight)))
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+            .testTag("wide_zoom_badge")
         ) {
           Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
           ) {
             Icon(
-              imageVector = if (isZoomedOut) Icons.Default.ZoomOut else Icons.Default.ZoomIn,
+              imageVector = Icons.Default.ZoomOut,
               contentDescription = null,
               tint = Color.Black,
               modifier = Modifier.size(13.dp)
             )
             Text(
-              text = if (isZoomedOut) "${String.format("%.2f", currentScale)}x WIDE" else "1.00x NORMAL",
+              text = "0.70x WIDE CUT",
               color = Color.Black,
-              fontSize = 11.sp,
-              fontWeight = FontWeight.ExtraBold,
-              fontFamily = FontFamily.Monospace
-            )
-          }
-        }
-
-        // Timecode & Frame Index Counter + Fullscreen Toggle
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-          Box(
-            modifier = Modifier
-              .clip(RoundedCornerShape(10.dp))
-              .background(DarkVoid.copy(alpha = 0.85f))
-              .border(0.5.dp, Slate700, RoundedCornerShape(10.dp))
-              .padding(horizontal = 8.dp, vertical = 4.dp)
-          ) {
-            val totalSec = currentTimeMs / 1000.0
-            val mins = (totalSec / 60).toInt()
-            val secs = totalSec % 60
-            Text(
-              text = String.format("%02d:%06.3f | F:%d", mins, secs, currentFrame),
-              color = Color.White,
               fontSize = 10.sp,
-              fontWeight = FontWeight.Bold,
-              fontFamily = FontFamily.Monospace
-            )
-          }
-
-          Box(
-            modifier = Modifier
-              .size(28.dp)
-              .clip(CircleShape)
-              .background(DarkVoid.copy(alpha = 0.85f))
-              .border(0.5.dp, Slate700, CircleShape)
-              .clickable { isFullscreenMode = !isFullscreenMode },
-            contentAlignment = Alignment.Center
-          ) {
-            Icon(
-              imageVector = if (isFullscreenMode) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-              contentDescription = "Fullscreen",
-              tint = CyanHighlight,
-              modifier = Modifier.size(16.dp)
+              fontWeight = FontWeight.ExtraBold,
+              letterSpacing = 0.5.sp
             )
           }
         }
       }
 
-      // HUD Bottom Info Bar: Format & Calibration
-      Row(
+      // Bottom Right Fullscreen Toggle
+      IconButton(
+        onClick = { isFullscreenMode = !isFullscreenMode },
         modifier = Modifier
-          .fillMaxWidth()
-          .align(Alignment.BottomCenter)
-          .padding(10.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+          .align(Alignment.BottomEnd)
+          .padding(8.dp)
+          .size(34.dp)
+          .background(DarkSurface.copy(alpha = 0.7f), CircleShape)
+          .border(0.5.dp, GlassHighlight, CircleShape)
+          .testTag("fullscreen_toggle_btn")
       ) {
-        Box(
-          modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(DarkVoid.copy(alpha = 0.75f))
-            .padding(horizontal = 6.dp, vertical = 3.dp)
-        ) {
-          Text(
-            text = "9:16 VERTICAL",
-            color = CyanHighlight,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold
-          )
-        }
-
-        Box(
-          modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(DarkVoid.copy(alpha = 0.75f))
-            .padding(horizontal = 6.dp, vertical = 3.dp)
-        ) {
-          Text(
-            text = "SPEECH ZOOM CADENCE",
-            color = Slate400,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold
-          )
-        }
+        Icon(
+          imageVector = if (isFullscreenMode) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+          contentDescription = "Toggle Fullscreen",
+          tint = Color.White,
+          modifier = Modifier.size(18.dp)
+        )
       }
     }
   }
